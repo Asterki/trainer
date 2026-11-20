@@ -1,341 +1,80 @@
-/**
- * Desktop navigation rail.
- *
- * Smart lists on top, then the category -> project tree, then places. The tree
- * collapses per category so a large workspace stays scannable.
- */
+/** Desktop navigation rail. Collapses to icons below 1100px. */
 
-import { useMemo, useState } from 'react';
 import {
-  FiBookOpen,
-  FiCalendar,
-  FiCheckCircle,
-  FiChevronDown,
-  FiChevronRight,
-  FiInbox,
-  FiList,
-  FiMapPin,
-  FiMoreHorizontal,
-  FiPlus,
+  FiClock,
+  FiRepeat,
   FiSettings,
-  FiStar,
+  FiSun,
+  FiTrendingUp,
 } from 'react-icons/fi';
-import type { Category, Project } from '../domain/types';
-import type { NavSelection } from '../state/navigation';
-import { todayISO } from '../domain/date';
-import { useTasker } from '../state/store';
+import type { IconType } from 'react-icons';
+import { BrandMark } from './BrandMark';
+import type { NavState, ViewKey } from '../state/navigation';
 
-interface SidebarProps {
-  selection: NavSelection;
-  onSelect: (selection: NavSelection) => void;
-  onCreateCategory: () => void;
-  onCreateProject: (categoryId: string | null) => void;
-  onCategoryMenu: (category: Category) => void;
-  onProjectMenu: (project: Project) => void;
-  onOpenManual: () => void;
+interface NavItem {
+  key: ViewKey;
+  label: string;
+  icon: IconType;
+  shortcut: string;
+  heading: string;
 }
 
-export function Sidebar({
-  selection,
-  onSelect,
-  onCreateCategory,
-  onCreateProject,
-  onCategoryMenu,
-  onProjectMenu,
-  onOpenManual,
-}: SidebarProps) {
-  const { tasks, categories, projects, places } = useTasker();
-  const today = todayISO();
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+const NAV_ITEMS: NavItem[] = [
+  { key: 'today', label: 'Today', icon: FiSun, shortcut: '1', heading: 'Train' },
+  { key: 'routine', label: 'Routine', icon: FiRepeat, shortcut: '2', heading: 'Train' },
+  { key: 'progress', label: 'Progress', icon: FiTrendingUp, shortcut: '3', heading: 'Review' },
+  { key: 'history', label: 'History', icon: FiClock, shortcut: '4', heading: 'Review' },
+  { key: 'settings', label: 'Settings', icon: FiSettings, shortcut: '5', heading: 'App' },
+];
 
-  const stats = useMemo(() => {
-    const open = tasks.filter((task) => !task.completed);
-    const byProject = new Map<string, number>();
-    const byCategory = new Map<string, number>();
-    const projectById = new Map(projects.map((project) => [project.id, project]));
-    const byPlace = new Map<string, number>();
-    const progressByProject = new Map<string, { done: number; total: number }>();
+interface SidebarProps {
+  nav: NavState;
+  onNavigate: (view: ViewKey) => void;
+}
 
-    for (const task of tasks) {
-      if (!task.projectId) continue;
-      const bucket = progressByProject.get(task.projectId) ?? { done: 0, total: 0 };
-      bucket.total += 1;
-      if (task.completed) bucket.done += 1;
-      progressByProject.set(task.projectId, bucket);
-    }
-
-    for (const task of open) {
-      if (task.projectId) {
-        byProject.set(task.projectId, (byProject.get(task.projectId) ?? 0) + 1);
-        const categoryId = projectById.get(task.projectId)?.categoryId;
-        if (categoryId) byCategory.set(categoryId, (byCategory.get(categoryId) ?? 0) + 1);
-      }
-      if (task.place) byPlace.set(task.place, (byPlace.get(task.place) ?? 0) + 1);
-    }
-
-    return {
-      scheduled: open.filter((task) => task.date).length,
-      today: open.filter((task) => task.date === today).length,
-      inbox: open.filter((task) => !task.projectId).length,
-      all: open.length,
-      completed: tasks.filter((task) => task.completed).length,
-      byProject,
-      byCategory,
-      byPlace,
-      progressByProject,
-    };
-  }, [tasks, projects, today]);
-
-  const isScope = (scope: NavSelection['scope']) =>
-    selection.view === 'tasks' && selection.scope === scope;
-
-  const select = (scope: NavSelection['scope'], extra: Partial<NavSelection> = {}) =>
-    onSelect({ view: 'tasks', scope, projectId: null, categoryId: null, place: null, ...extra });
-
-  function toggleCategory(id: string) {
-    setCollapsed((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
-
-  const uncategorised = projects.filter((project) => !project.categoryId);
-
-  function renderProject(project: Project) {
-    const active = isScope('project') && selection.projectId === project.id;
-    const ratio = stats.progressByProject.get(project.id);
-    const percent = ratio && ratio.total > 0 ? Math.round((ratio.done / ratio.total) * 100) : 0;
-    return (
-      <div className="rail__row" key={project.id}>
-        <button
-          type="button"
-          className={`rail__item rail__item--nested${active ? ' rail__item--active' : ''}`}
-          onClick={() => select('project', { projectId: project.id })}
-        >
-          <span className="dot" style={{ background: project.color }} />
-          <span className="rail__label">{project.name}</span>
-          <span className="rail__count">{stats.byProject.get(project.id) ?? 0}</span>
-        </button>
-        {ratio && ratio.total > 0 && (
-          <span
-            className="rail__progress"
-            title={`${ratio.done} of ${ratio.total} done`}
-            aria-hidden="true"
-          >
-            <span style={{ width: `${percent}%` }} />
-          </span>
-        )}
-        <button
-          type="button"
-          className="rail__more"
-          onClick={() => onProjectMenu(project)}
-          aria-label={`Manage project ${project.name}`}
-        >
-          <FiMoreHorizontal aria-hidden="true" />
-        </button>
-      </div>
-    );
-  }
-
+export function Sidebar({ nav, onNavigate }: SidebarProps) {
   return (
     <aside className="rail" aria-label="Primary navigation">
-      <nav className="rail__group">
-        <span className="rail__heading">Smart lists</span>
-        <button
-          type="button"
-          className={`rail__item${isScope('scheduled') ? ' rail__item--active' : ''}`}
-          onClick={() => select('scheduled')}
-        >
-          <span className="rail__glyph"><FiCalendar aria-hidden="true" /></span> Scheduled
-          <span className="rail__count">{stats.scheduled}</span>
-        </button>
-        <button
-          type="button"
-          className={`rail__item${isScope('today') ? ' rail__item--active' : ''}`}
-          onClick={() => select('today')}
-        >
-          <span className="rail__glyph"><FiStar aria-hidden="true" /></span> Today
-          <span className="rail__count">{stats.today}</span>
-        </button>
-        <button
-          type="button"
-          className={`rail__item${isScope('inbox') ? ' rail__item--active' : ''}`}
-          onClick={() => select('inbox')}
-        >
-          <span className="rail__glyph"><FiInbox aria-hidden="true" /></span> Inbox
-          <span className="rail__count">{stats.inbox}</span>
-        </button>
-        <button
-          type="button"
-          className={`rail__item${isScope('all') ? ' rail__item--active' : ''}`}
-          onClick={() => select('all')}
-        >
-          <span className="rail__glyph"><FiList aria-hidden="true" /></span> All tasks
-          <span className="rail__count">{stats.all}</span>
-        </button>
-        <button
-          type="button"
-          className={`rail__item${isScope('completed') ? ' rail__item--active' : ''}`}
-          onClick={() => select('completed')}
-        >
-          <span className="rail__glyph"><FiCheckCircle aria-hidden="true" /></span> Completed
-          <span className="rail__count">{stats.completed}</span>
-        </button>
-      </nav>
-
-      <nav className="rail__group">
-        <span className="rail__heading">
-          Categories
-          <button
-            type="button"
-            className="rail__add"
-            onClick={onCreateCategory}
-            aria-label="New category"
-            title="New category"
-          >
-            <FiPlus aria-hidden="true" />
-          </button>
+      <div className="rail__brand">
+        <span className="rail__brand-mark">
+          <BrandMark />
         </span>
+        <span className="rail__brand-text">
+          <span className="rail__brand-name">Trainer</span>
+          <span className="rail__brand-sub">Train on your terms</span>
+        </span>
+      </div>
 
-        {categories.length === 0 && uncategorised.length === 0 && (
-          <p className="rail__empty">Group projects into categories like “Work”.</p>
-        )}
-
-        {categories.map((category) => {
-          const owned = projects.filter((project) => project.categoryId === category.id);
-          const isCollapsed = collapsed.has(category.id);
-          const active = isScope('category') && selection.categoryId === category.id;
+      <nav className="rail__nav" aria-label="Views">
+        {NAV_ITEMS.map((item, index) => {
+          const Icon = item.icon;
+          const firstInGroup = index === 0 || NAV_ITEMS[index - 1]?.heading !== item.heading;
+          const active = nav.view === item.key;
 
           return (
-            <div className="rail__category" key={category.id}>
-              <div className="rail__row">
-                <button
-                  type="button"
-                  className={`rail__item rail__item--category${active ? ' rail__item--active' : ''}`}
-                  onClick={() => select('category', { categoryId: category.id })}
-                >
-                  <span
-                    className="rail__caret"
-                    role="presentation"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      toggleCategory(category.id);
-                    }}
-                  >
-                    {isCollapsed ? <FiChevronRight aria-hidden="true" /> : <FiChevronDown aria-hidden="true" />}
-                  </span>
-                  <span className="dot" style={{ background: category.color }} />
-                  <span className="rail__label">{category.name}</span>
-                  <span className="rail__count">{stats.byCategory.get(category.id) ?? 0}</span>
-                </button>
-                <button
-                  type="button"
-                  className="rail__more"
-                  onClick={() => onCategoryMenu(category)}
-                  aria-label={`Manage category ${category.name}`}
-                >
-                  <FiMoreHorizontal aria-hidden="true" />
-                </button>
-              </div>
-
-              {!isCollapsed && (
-                <>
-                  {owned.map(renderProject)}
-                  <button
-                    type="button"
-                    className="rail__item rail__item--nested rail__item--ghost"
-                    onClick={() => onCreateProject(category.id)}
-                  >
-                    <span className="rail__glyph"><FiPlus aria-hidden="true" /></span>
-                    <span className="rail__label">New project</span>
-                  </button>
-                </>
-              )}
+            <div className="rail__group" key={item.key}>
+              {firstInGroup && <span className="rail__heading">{item.heading}</span>}
+              <button
+                type="button"
+                className={`rail__item${active ? ' rail__item--active' : ''}`}
+                onClick={() => onNavigate(item.key)}
+                aria-current={active ? 'page' : undefined}
+                title={item.label}
+              >
+                <span className="rail__glyph">
+                  <Icon aria-hidden="true" />
+                </span>
+                <span className="rail__label">{item.label}</span>
+                <kbd className="rail__shortcut">{item.shortcut}</kbd>
+              </button>
             </div>
           );
         })}
-
-        {uncategorised.length > 0 && (
-          <div className="rail__category">
-            <div className="rail__row">
-              <button
-                type="button"
-                className={`rail__item rail__item--category${
-                  isScope('category') && selection.categoryId === null ? ' rail__item--active' : ''
-                }`}
-                onClick={() => select('category', { categoryId: null })}
-              >
-                <span
-                  className="rail__caret"
-                  role="presentation"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    toggleCategory('__none__');
-                  }}
-                >
-                  {collapsed.has('__none__') ? <FiChevronRight aria-hidden="true" /> : <FiChevronDown aria-hidden="true" />}
-                </span>
-                <span className="rail__label">Uncategorised</span>
-                <span className="rail__count">{uncategorised.length}</span>
-              </button>
-            </div>
-            {!collapsed.has('__none__') && (
-              <>
-                {uncategorised.map(renderProject)}
-                <button
-                  type="button"
-                  className="rail__item rail__item--nested rail__item--ghost"
-                  onClick={() => onCreateProject(null)}
-                >
-                  <span className="rail__glyph"><FiPlus aria-hidden="true" /></span>
-                  <span className="rail__label">New project</span>
-                </button>
-              </>
-            )}
-          </div>
-        )}
-
-        {(categories.length > 0 || uncategorised.length === 0) && (
-          <button type="button" className="rail__item rail__item--ghost" onClick={() => onCreateProject(null)}>
-            <span className="rail__glyph"><FiPlus aria-hidden="true" /></span>
-            <span className="rail__label">New project</span>
-          </button>
-        )}
       </nav>
 
-      {places.length > 0 && (
-        <nav className="rail__group">
-          <span className="rail__heading">Places</span>
-          {places.map((place) => (
-            <button
-              key={place.id}
-              type="button"
-              className={`rail__item${
-                isScope('place') && selection.place === place.name ? ' rail__item--active' : ''
-              }`}
-              onClick={() => select('place', { place: place.name })}
-            >
-              <span className="rail__glyph"><FiMapPin aria-hidden="true" /></span>
-              <span className="rail__label">{place.name}</span>
-              <span className="rail__count">{stats.byPlace.get(place.name) ?? 0}</span>
-            </button>
-          ))}
-        </nav>
-      )}
-
       <div className="rail__footer">
-        <button
-          type="button"
-          className={`rail__item${selection.view === 'settings' ? ' rail__item--active' : ''}`}
-          onClick={() => onSelect({ ...selection, view: 'settings', projectId: null, categoryId: null, place: null })}
-        >
-          <span className="rail__glyph"><FiSettings aria-hidden="true" /></span> Settings
-        </button>
-        <button type="button" className="rail__item" onClick={onOpenManual}>
-          <span className="rail__glyph"><FiBookOpen aria-hidden="true" /></span> User manual
-        </button>
+        <span className="rail__build">v{__APP_VERSION__}</span>
+        <span className="rail__build-note">Data stays on this device</span>
       </div>
     </aside>
   );

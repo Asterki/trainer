@@ -1,43 +1,159 @@
-You are an expert full-stack developer. Build an end-to-end, fully functional, production-ready todo web application named "Tasker". Follow the instructions below precisely, avoiding any placeholders, mock implementations, or shortcuts.
+You are an expert full-stack developer. Build **Trainer**, an end-to-end, production-ready,
+local-first routine builder and workout logger. Follow the staged plan precisely, avoiding
+placeholders, mock implementations, and shortcuts.
 
-### Design System Reference (DESIGN.md Alignment)
-- Incorporate a clean Nordic aesthetic: crisp typography, generous functional whitespace, and high-contrast readable states.
-- Color Palette: Ice blue/slate accents, cool gray backgrounds, distinct muted tones for low priority, and sharp accents for high priority.
-- Desktop UI: Implement a cohesive global menu layout optimized for large viewports, adhering to a clean, left-aligned window control scheme.
-- Mobile UI: Implement a swipe-to-close bottom sheet drawer for creation and details panel interfaces, optimized entirely for thumb zone interactions.
+**Source of truth:** [`docs/stages/README.md`](docs/stages/README.md) and the numbered stage files
+beside it. Read them in order before changing code. If this brief and the stage plan disagree, the
+stage plan wins. Do not reopen decisions the README marks as locked.
 
-### Architecture & Runtime Environment
-- Framework & Deployment: Built as a TypeScript Single Page Application (SPA). The app is explicitly configured for deployment to Vercel. 
-- Multi-Environment Support: Provide a robust production configuration natively within the build pipeline config (e.g., angular.json, vite.config.ts, or next.config.js as applicable) to handle environment replacements seamlessly.
-- Data Ownership & Performance: Single-user architecture with no account registration or authentication middleware. The application is completely local-first. All task, project, and subscription configurations must be stored locally on the client device using IndexedDB for high-throughput, structured data persistence.
-- Offline Capability & PWA: Fully installable Progressive Web App (PWA). Configure a custom service worker (`sw.js`) that handles network caching for true offline-first operations.
-- Data Portability: Provide direct, easy-to-use JSON export and import options in the UI to backup or restore the entire application state.
+## Product
 
-### Core Features & Views
-1. Project & Categorization Engine: Users can create and manage isolated Projects. Each project supports its own set of custom tags.
-2. Cross-Sectional Views:
-   - "Tasks" View: A clean list layout emphasizing quick sorting, debounced live-filtering, and task manipulation.
-   - Calendar View: An interactive calendar displaying task distribution across days and weeks.
-   - Roadmap View: A timeline displaying tasks grouped by execution sequences and deadlines.
-3. Metadata Engine: Support Priorities (1 to 4), physical/contextual Places, absolute Dates, absolute Times, and granular time settings (All-day events vs. micro-scheduled timeframes).
-4. Recurrence Engine: Robust handling for recurring criteria, supporting both straightforward cycles (e.g., daily, weekly) and highly customized recurring patterns.
-5. Inline Natural Language Parsing (Todoist-Style): 
-   - Implement an intelligent, instantaneous input parser. As the user types, it visually reflects parsed metrics.
-   - Example Input: "Create a new feature in the app @work tomorrow !1 #UNAH"
-   - Expected Output: A task with title "Create a new feature in the app", dated for the exact next calendar day, assigned Context/Place: "work", Priority: "1", and mapped to Project: "UNAH".
+Trainer owns the routine and the log. The user defines a repeating cycle of weeks and weekdays,
+where each slot is either a workout with a focus label (Push, Pull, Legs, Upper, Lower…) or rest.
+An external n8n workflow reads a compact training report and writes today's planned session
+(exercises, target sets, target rep ranges) through an authenticated API. The user trains and logs
+the weight and reps of every set. PRs, muscle volume, adherence and history are derived from those
+logs.
 
-### Notification Engine (Vercel Cron + Web Push)
-- Serverless Wakeups: Create a root-level `vercel.json` configuring a Vercel Cron Job to call `/api/check-reminders` exactly every minute (`* * * * *`).
-- The Client Setup: The frontend must request browser notification permissions. If granted, the service worker must subscribe via the browser's `PushManager` using VAPID keys, passing the subscription payload to be saved inside the local IndexedDB.
-- The Serverless Handler: Build the serverless endpoint (`/api/check-reminders.ts`) using the standard Node.js/TypeScript `web-push` library. 
-- Process Flow: When called by Vercel Cron, the function fetches the active push subscription and upcoming tasks, checks for exact timestamp matches against the current system time, sends a secure, encrypted Web Push payload to the browser vendor endpoint, and marks the task as reminded.
-- Background Delivery: The application's service worker must contain an active listener for the 'push' event. When fired, it must read the payload and safely call `self.registration.showNotification()` to alert the user even if the browser tab and app are completely closed.
+The loop is: **routine → scheduled slot → generated session → logged sets → derived history →
+next generated session.**
 
-### Implementation Constraints
-- STRICTLY FORBIDDEN: Do not create a separate shared function utility library. All code must reside systematically within its structural domain.
-- STRICTLY FORBIDDEN: Do not write extensive unit, integration, or E2E tests. Focus purely on clean, production-grade application code.
-- KEEP IT SIMPLE: Avoid overengineering. Optimize code for maintenance, readable code paths, and performant UI updates.
+There is no account system, no in-app LLM, and no AI provider key in the app.
 
-### Required Deliverables
-1. Complete, functional code files containing the complete implementation for the frontend app, service worker, serverless API endpoint, and deployment config files.
-2. An inline Markdown User Manual explaining the application layout, shortcuts, natural language syntax tokens (`@`, `!`, `#`), backup instructions, and how notifications are initialized.
+## Source of truth and stage workflow
+
+- `docs/stages/README.md` defines the product, glossary, invariants and decisions.
+- Stages: 01 design/contract, 02 rebrand/strip, 03 domain/catalogue, 04 routine builder,
+  05 today/logging, 06 progress/reports, 07 relay API/n8n, 08 MCP/manual/polish.
+- Implement stages in order. Each stage must leave the app runnable and must not break an earlier
+  stage's manual checklist.
+- Stage 1 is design and contract only: `docs/design.md`, draft OpenAPI, context-report schema and
+  the n8n contract. No product code in that stage.
+- Every stage ends with the same gate:
+  ```bash
+  pnpm typecheck
+  pnpm build
+  ```
+  Then run that stage's manual checklist in a desktop browser and a narrow mobile viewport. The
+  checklists are the acceptance tests; the repository policy forbids extensive automated tests.
+- Intermediate stages may show honest empty states ("No routine yet", "Plan not generated yet") but
+  never fake data or dead controls.
+- The current repository is the legacy Tasker todo app. Stage 2 rebrands and strips it; Stage 3
+  replaces the task domain. Do not build new task features while the transition is in progress.
+
+## Design system
+
+Incorporate a clean Nordic aesthetic: crisp typography, generous functional whitespace, and
+high-contrast readable states. Palette and type scale come from `DESIGN.Md` (ice blue/slate accents,
+cool gray surfaces). Add semantic tokens only where needed: `--success` (completed), `--warning`
+(plan pending), `--danger` (skipped/error), `--rest`.
+
+- **Desktop:** cohesive left rail with Today, Routine, Progress, History, Settings. Rail collapses to
+  icons below 1100px. One primary action per state. No floating action button.
+- **Mobile:** bottom tab bar with Today, Routine, Progress, More. Creation, pickers and detail panels
+  use a swipe-to-close bottom sheet in the thumb zone. Touch targets at least 44×44px; respect safe
+  areas. No horizontal page scroll.
+- Weights, reps, volume and PRs use tabular numerals. Status is never signalled by colour alone.
+- Charts are pure accessible SVG (`role="img"`, labels, table fallback). No chart library.
+- Reuse `BottomSheet` and the existing primitives. Keep `prefers-reduced-motion` support.
+
+## Architecture and runtime
+
+- **Frontend:** TypeScript SPA using React 18, Vite 6 and pnpm. It deploys to Vercel as static
+  files. `vercel.json` is the SPA rewrite plus service-worker/manifest/asset headers — no Vercel
+  functions and no cron.
+- **Environment:** Vite modes and build-time defines (`__APP_VERSION__`, `__APP_MODE__`,
+  `__BUILD_TIME__`). Keep `vite.config.ts` as the build pipeline configuration; no server-side
+  configuration is required for the SPA.
+- **Data:** single-user, local-first. All routines, sessions, custom exercises and settings live in
+  IndexedDB database `trainer` (schema v1). Never open, migrate or delete Tasker's `tasker` database.
+  Every user action writes locally first; no screen waits on the network.
+- **PWA:** installable, custom `public/sw.js` with shell precache and runtime caching, cache names
+  `trainer-*`. Trainer has **no push notifications and no reminder engine**. Remove the legacy ntfy
+  and web-push code; no notification permission prompt.
+- **Relay:** a self-hosted Express + SQLite service in `server/`. It stores encrypted entities,
+  provides `/api/v1/*` authenticated with `Authorization: Bearer <sync passphrase>`, serves the
+  OpenAPI spec, and exposes a read-only `/mcp`. It decrypts in memory to build reports and validate
+  writes; this trust trade-off is accepted. TLS is mandatory.
+- **AI:** n8n calls the relay, never IndexedDB. The app receives generated plans through normal sync
+  and keeps the last known plan offline.
+- **Portability:** JSON export/import of the full Trainer state in Settings, plus reset. Import is
+  replace-only and blocked while sync is connected.
+
+## Domain rules to preserve
+
+- Dates are local calendar strings (`YYYY-MM-DD`), never `toISOString()` for "today". ISO weekdays
+  are 1 (Monday) through 7 (Sunday).
+- A routine is a cycle of `weekCount × 7` slots with a start date. Cycles are 1–12 weeks. Exactly one
+  routine is active at a time, enforced in one transaction.
+- Routine slots own only focus/rest and a note. The AI composes exercises per session.
+- Sessions snapshot routine name, focus, week index, exercise name and muscles at creation. Editing
+  the catalogue or routine never rewrites history.
+- Only scheduled workout days create sessions. Rest days never do. Missing scheduled days in the
+  last 13 days are backfilled as `skipped`; unfinished planned past sessions become `skipped`.
+- A session is editable only while its date is today and it is not skipped. Completion is terminal
+  at midnight; history is read-only.
+- Weight is kilograms (number, 0 for bodyweight, 2 decimals max); reps are integers 1–999. The AI
+  prescribes sets and rep ranges only, never weight.
+- Derived data is never stored: PRs, volume, adherence and streaks are computed from sessions.
+  - PR = heaviest weight for a given rep count, earliest date on a tie. Bodyweight sets are excluded.
+  - Volume = `weight × reps`; primary muscles get full credit, secondary muscles half.
+  - Adherence = completed / (completed + skipped) for scheduled workout days; rest and ad-hoc
+    sessions are excluded from the rate.
+- The AI cannot invent exercises. API writes use a catalogue id or a resolved exact name; unknown
+  or ambiguous names are rejected (`422` / `409`). Seeded catalogue ids are `wger:<id>`.
+- The app never prescribes or generates a routine automatically in v1.
+
+## Structural boundaries
+
+- Pure rules live in `src/domain/*`; storage in `src/db`; React state in `src/state`; sync in
+  `src/sync`; views in `src/views`; shared UI in `src/components`; catalogue data in
+  `src/domain/catalogue`.
+- Server domain rules live in `server/src/trainer/*`, encrypted-space access in `server/src/space/*`,
+  API routing in `server/src/api/*`.
+- **STRICTLY FORBIDDEN:** do not create a separate shared function library, generic `utils.ts` or
+  cross-cutting helper package. Code lives inside its structural domain. Client and server duplicate
+  domain rules deliberately because the server cannot import browser code; keep them in parity using
+  the Stage 7 checklist.
+- **STRICTLY FORBIDDEN:** do not write extensive unit, integration or E2E tests. Focus on clean,
+  production-grade application code.
+- **KEEP IT SIMPLE:** avoid overengineering. Optimise for maintenance, readable code paths and
+  performant UI updates. No new runtime dependency without a written reason. Charts are SVG, dates
+  use `Intl` and local date strings, icons use the existing `react-icons`.
+
+## Key commands
+
+```bash
+pnpm dev             # Vite dev server
+pnpm typecheck       # app + config type check
+pnpm build           # type check + production build
+pnpm preview         # preview the production build
+
+cd server
+pnpm dev             # relay dev server
+pnpm typecheck
+pnpm build
+pnpm start
+```
+
+Stage 3 adds `node scripts/build-exercises.mjs` for the committed wger catalogue. Builds never fetch
+the network; the generated JSON is committed.
+
+## Required deliverables
+
+1. Complete, functional code for the frontend, custom service worker, relay API, MCP endpoint and
+   deployment configuration (`vercel.json`, `server/Dockerfile`).
+2. `docs/design.md`, `docs/api/openapi.json`, `docs/ai/context-report.schema.json` and the n8n
+   workflow documentation.
+3. `USER_MANUAL.md` and the in-app manual (`src/docs/UserManual.tsx`), kept in sync. The manual must
+   cover: what Trainer is; install/offline; building a routine; Today statuses; logging sets and
+   bodyweight 0; missed days; exact progress definitions; read-only history; exercise catalogue and
+   custom exercises; AI/relay/n8n setup and security warning; backup, import and reset; settings;
+   keyboard shortcuts; troubleshooting; data/privacy; wger attribution.
+
+## Explicitly out of scope for v1
+
+Do not build: bodyweight load tracking and bodyweight volume, lb/kg toggle, RPE, tempo, rest timers,
+exercise images/videos, AI-authored routines, in-app LLM chat, push/email reminders, separate
+revocable API tokens, multi-user spaces or sharing, Apple Health/Google Fit import, cardio and
+heart-rate tracking, drag-and-drop routine editing.

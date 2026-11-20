@@ -1,9 +1,9 @@
 /**
  * Service-worker registration.
  *
- * The worker itself lives at `public/sw.js` and owns the offline cache. It is
- * registered from the production bundle only, so it never fights Vite's HMR
- * during development.
+ * The worker itself lives at `public/sw.js` and owns Trainer's offline cache.
+ * It is registered from the production bundle only, so it never fights Vite's
+ * HMR during development.
  */
 
 export async function registerServiceWorker(): Promise<ServiceWorkerRegistration | null> {

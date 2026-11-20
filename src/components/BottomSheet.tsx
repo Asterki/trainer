@@ -16,14 +16,21 @@ interface BottomSheetProps {
   footer?: ReactNode;
   /** Optional accent colour for the title dot. */
   accent?: string;
+  /** Optional layout modifier, e.g. a full-height editor. */
+  className?: string;
 }
 
-export function BottomSheet({ open, title, onClose, children, footer, accent }: BottomSheetProps) {
+export function BottomSheet({ open, title, onClose, children, footer, accent, className }: BottomSheetProps) {
   const sheetRef = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
   const [dragY, setDragY] = useState(0);
   const dragState = useRef({ active: false, startY: 0, startTime: 0, lastY: 0 });
 
   const reset = useCallback(() => setDragY(0), []);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
 
   useEffect(() => {
     if (!open) reset();
@@ -32,11 +39,11 @@ export function BottomSheet({ open, title, onClose, children, footer, accent }: 
   useEffect(() => {
     if (!open) return;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
+      if (event.key === 'Escape') onCloseRef.current();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [open, onClose]);
+  }, [open]);
 
   const onPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     dragState.current = {
@@ -76,7 +83,7 @@ export function BottomSheet({ open, title, onClose, children, footer, accent }: 
     <div className="sheet-backdrop" onClick={onClose} role="presentation">
       <div
         ref={sheetRef}
-        className="sheet"
+        className={`sheet${className ? ` ${className}` : ''}`}
         style={{
           transform: `translateY(${dragY}px)`,
           transition: dragState.current.active ? 'none' : 'transform 220ms cubic-bezier(0.22, 1, 0.36, 1)',

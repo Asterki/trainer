@@ -1,10 +1,10 @@
 {
-  "name": "tasker",
-  "version": "1.0.0",
+  "name": "trainer",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.34.7",
-  "description": "Tasker — a local-first, offline-capable todo and planning app.",
+  "description": "Trainer — a local-first routine builder and workout logger.",
   "scripts": {
     "dev": "vite",
     "build": "tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.node.json --noEmit && vite build",

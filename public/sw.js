@@ -1,22 +1,22 @@
 /*
- * Tasker service worker.
+ * Trainer service worker.
  *
  * Owns the offline-first cache so the app shell boots with no network at all.
- * It is intentionally dependency-free and versioned by CACHE_VERSION.
+ * It is intentionally dependency-free and versioned by BUILD_ID.
  */
 
 const BUILD_ID = '__BUILD_ID__';
-const CACHE_VERSION = `tasker-${BUILD_ID}`;
-const SHELL_CACHE = `${CACHE_VERSION}-shell`;
-const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
+const CACHE_PREFIX = 'trainer-';
+const SHELL_CACHE = `${CACHE_PREFIX}shell-${BUILD_ID}`;
+const RUNTIME_CACHE = `${CACHE_PREFIX}runtime-${BUILD_ID}`;
 
 /** Core files that make the app bootable offline. */
 const SHELL_ASSETS = [
   '/',
   '/index.html',
   '/manifest.webmanifest',
-  '/icons/icon-192.png',
-  '/icons/icon-512.png',
+  '/icons/trainer-192.png',
+  '/icons/trainer-512.png',
 ];
 
 /**
@@ -62,8 +62,17 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     (async () => {
       const keys = await caches.keys();
+      // Remove only this app's caches: current and previous Trainer builds plus
+      // the legacy Tasker names. Other caches on the origin are left alone.
       await Promise.all(
-        keys.filter((key) => !key.startsWith(CACHE_VERSION)).map((key) => caches.delete(key)),
+        keys
+          .filter(
+            (key) =>
+              key !== SHELL_CACHE &&
+              key !== RUNTIME_CACHE &&
+              (key.startsWith(CACHE_PREFIX) || key.startsWith('tasker-')),
+          )
+          .map((key) => caches.delete(key)),
       );
       await precacheBuildAssets();
       await self.clients.claim();

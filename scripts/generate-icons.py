@@ -1,4 +1,4 @@
-"""Generate Tasker PWA icons (flat Nordic brand mark) with no dependencies."""
+"""Generate Trainer PWA icons (flat Nordic barbell mark) with no dependencies."""
 
 import struct
 import zlib
@@ -8,8 +8,9 @@ OUT = Path(__file__).resolve().parents[1] / "public" / "icons"
 OUT.mkdir(parents=True, exist_ok=True)
 
 PRIMARY = (0x26, 0x3B, 0xAA)
+SURFACE = (0xF7, 0xF8, 0xF9)
+DARK = (0x10, 0x14, 0x18)
 ACCENT = (0x8F, 0xA8, 0xBE)
-WHITE = (0xFF, 0xFF, 0xFF)
 SS = 4  # supersampling factor
 
 
@@ -17,6 +18,7 @@ def write_png(path: Path, width: int, height: int, pixels: bytes) -> None:
     raw = b"".join(
         b"\x00" + pixels[y * width * 4 : (y + 1) * width * 4] for y in range(height)
     )
+
     def chunk(tag: bytes, data: bytes) -> bytes:
         return (
             struct.pack(">I", len(data))
@@ -33,7 +35,7 @@ def write_png(path: Path, width: int, height: int, pixels: bytes) -> None:
 
 
 def rounded_rect_coverage(x: float, y: float, radius: float) -> float:
-    """Signed coverage for a unit square [0,1]^2 with rounded corners."""
+    """Coverage for a unit square [0,1]^2 with rounded corners."""
     cx = min(max(x, radius), 1 - radius)
     cy = min(max(y, radius), 1 - radius)
     dx = x - cx
@@ -43,35 +45,33 @@ def rounded_rect_coverage(x: float, y: float, radius: float) -> float:
     return 0.0
 
 
-def segment_distance(px, py, ax, ay, bx, by) -> float:
-    vx, vy = bx - ax, by - ay
-    wx, wy = px - ax, py - ay
-    length_sq = vx * vx + vy * vy
-    t = 0.0 if length_sq == 0 else max(0.0, min(1.0, (wx * vx + wy * vy) / length_sq))
-    projx, projy = ax + t * vx, ay + t * vy
-    return ((px - projx) ** 2 + (py - projy) ** 2) ** 0.5
+def box_hit(x: float, y: float, x0: float, y0: float, x1: float, y1: float) -> bool:
+    return x0 <= x <= x1 and y0 <= y <= y1
 
 
-CHECK = [(0.28, 0.52), (0.44, 0.68), (0.73, 0.34)]
-
-
-def check_coverage(x: float, y: float, scale: float, offset: float, stroke: float) -> float:
-    px = (x - offset) / scale
-    py = (y - offset) / scale
-    best = min(
-        segment_distance(px, py, *CHECK[0], *CHECK[1]),
-        segment_distance(px, py, *CHECK[1], *CHECK[2]),
-    )
-    return 1.0 if best <= stroke / 2 else 0.0
+def mark_hit(x: float, y: float) -> bool:
+    """A centred barbell: bar, two tall plates and two short outer plates."""
+    if box_hit(x, y, 0.00, 0.470, 1.00, 0.530):
+        return True
+    if box_hit(x, y, 0.145, 0.170, 0.245, 0.830):
+        return True
+    if box_hit(x, y, 0.755, 0.170, 0.855, 0.830):
+        return True
+    if box_hit(x, y, 0.025, 0.310, 0.100, 0.690):
+        return True
+    if box_hit(x, y, 0.900, 0.310, 0.975, 0.690):
+        return True
+    return False
 
 
 def render(size: int, rounded: bool, maskable: bool) -> bytes:
-    hi = size * SS
     out = bytearray()
     radius = 0.22
-    # Maskable icons keep a 20% safe margin; normal icons use the full square.
-    content_scale = 0.62 if maskable else 0.78
+    # Normal icons use most of the square. Maskable icons keep a 20% safe margin.
+    content_scale = 0.60 if maskable else 0.78
     offset = (1 - content_scale) / 2
+    background = DARK if maskable else SURFACE
+    foreground = ACCENT if maskable else PRIMARY
 
     for y in range(size):
         for x in range(size):
@@ -85,19 +85,13 @@ def render(size: int, rounded: bool, maskable: bool) -> bytes:
                     if inside == 0.0:
                         continue
 
-                    # Soft accent halo behind the checkmark.
-                    halo = check_coverage(ux, uy, content_scale, offset, 0.22)
-                    check = check_coverage(ux, uy, content_scale, offset, 0.105)
+                    mx = (ux - offset) / content_scale
+                    my = (uy - offset) / content_scale
+                    colour = foreground if (0.0 <= mx <= 1.0 and 0.0 <= my <= 1.0 and mark_hit(mx, my)) else background
 
-                    base = PRIMARY
-                    if halo > 0:
-                        base = ACCENT
-                    if check > 0:
-                        base = WHITE
-
-                    r += base[0] / 255
-                    g += base[1] / 255
-                    b += base[2] / 255
+                    r += colour[0] / 255
+                    g += colour[1] / 255
+                    b += colour[2] / 255
                     a += inside
 
             samples = SS * SS
@@ -115,9 +109,9 @@ def render(size: int, rounded: bool, maskable: bool) -> bytes:
 
 def main() -> None:
     targets = [
-        ("icon-192.png", 192, True, False),
-        ("icon-512.png", 512, True, False),
-        ("maskable-512.png", 512, False, True),
+        ("trainer-192.png", 192, True, False),
+        ("trainer-512.png", 512, True, False),
+        ("trainer-maskable-512.png", 512, False, True),
     ]
     for name, size, rounded, maskable in targets:
         pixels = render(size, rounded, maskable)

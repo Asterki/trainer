@@ -1,34 +1,18 @@
 /** Navigation model shared by the shell, the rail and the bottom tab bar. */
 
-export type ViewKey = 'tasks' | 'calendar' | 'roadmap' | 'settings';
+export type ViewKey = 'today' | 'routine' | 'progress' | 'history' | 'settings';
 
-export type TaskScope =
-  | 'scheduled'
-  | 'all'
-  | 'today'
-  | 'upcoming'
-  | 'inbox'
-  | 'completed'
-  | 'project'
-  | 'category'
-  | 'place';
-
-export interface NavSelection {
+export interface NavState {
   view: ViewKey;
-  scope: TaskScope;
-  projectId: string | null;
-  categoryId: string | null;
-  place: string | null;
+  /** Optional date or entity the view should focus. */
+  date: string | null;
+  sessionId: string | null;
+  exerciseId: string | null;
 }
 
-/**
- * The landing view: every task that has a date, grouped by the day it sits on.
- * Undated work stays in the Inbox or inside its project.
- */
-export const INITIAL_SELECTION: NavSelection = {
-  view: 'tasks',
-  scope: 'scheduled',
-  projectId: null,
-  categoryId: null,
-  place: null,
+export const INITIAL_NAV: NavState = {
+  view: 'today',
+  date: null,
+  sessionId: null,
+  exerciseId: null,
 };

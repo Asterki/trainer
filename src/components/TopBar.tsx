@@ -1,34 +1,35 @@
-/**
- * Global menu bar.
- *
- * Search lives on the left, utility actions on the right. The shell has no
- * logo or window chrome — the workspace itself carries the identity.
- */
+/** Slim application bar: identity, local-first badge and theme control. */
 
-import { FiPlus, FiSearch } from 'react-icons/fi';
-import { ProgressHud } from './ProgressHud';
+import { FiMoon, FiSun } from 'react-icons/fi';
+import { BrandMark } from './BrandMark';
+import type { Theme } from '../state/theme';
 
 interface TopBarProps {
-  onFocusSearch: () => void;
-  onFocusQuickAdd: () => void;
+  theme: Theme;
+  onToggleTheme: () => void;
 }
 
-export function TopBar({ onFocusSearch, onFocusQuickAdd }: TopBarProps) {
+export function TopBar({ theme, onToggleTheme }: TopBarProps) {
+  const nextTheme = theme === 'dark' ? 'light' : 'dark';
+
   return (
     <header className="topbar">
-      <div className="topbar__left">
-        <button type="button" className="search-trigger" onClick={onFocusSearch}>
-          <FiSearch aria-hidden="true" />
-          <span className="search-trigger__label">Search tasks</span>
-          <kbd>/</kbd>
-        </button>
+      <div className="topbar__identity">
+        <BrandMark className="topbar__mark" />
+        <span className="topbar__name">Trainer</span>
+        <span className="topbar__tagline">Routine &amp; log</span>
       </div>
 
       <div className="topbar__right">
-        <ProgressHud />
-        <button type="button" className="button button--primary" onClick={onFocusQuickAdd}>
-          <FiPlus aria-hidden="true" />
-          Add task
+        <span className="badge badge--quiet">Local-first</span>
+        <button
+          type="button"
+          className="icon-button"
+          onClick={onToggleTheme}
+          aria-label={`Switch to ${nextTheme} theme`}
+          title={`Switch to ${nextTheme} theme`}
+        >
+          {theme === 'dark' ? <FiSun aria-hidden="true" /> : <FiMoon aria-hidden="true" />}
         </button>
       </div>
     </header>

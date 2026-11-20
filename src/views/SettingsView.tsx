@@ -1,740 +1,689 @@
-/**
- * Settings — appearance, progress, workspace and data.
- */
+/** Settings — appearance, training, custom exercises, data and about. */
 
-import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
-import { FiBell, FiLock, FiTrendingUp } from 'react-icons/fi';
-import type { BackupFile, Category, NotificationSettings, Settings } from '../domain/types';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  deviceTimezone,
-  formatDateShort,
-  formatInTimezone,
-  formatTime,
-  isValidTimezone,
-  todayISO,
-} from '../domain/date';
-import { completionsByDay, currentStreak, levelForXp, ACHIEVEMENTS } from '../domain/progress';
-import { CATEGORY_COLORS, useTasker } from '../state/store';
+  FiActivity,
+  FiDatabase,
+  FiDownload,
+  FiEdit2,
+  FiInfo,
+  FiList,
+  FiMoon,
+  FiPlus,
+  FiSearch,
+  FiSun,
+  FiTrash2,
+  FiUpload,
+} from 'react-icons/fi';
+import { BottomSheet } from '../components/BottomSheet';
+import { BrandMark } from '../components/BrandMark';
+import { ConfirmDialog } from '../components/ConfirmDialog';
+import { CustomExerciseForm } from '../components/CustomExerciseForm';
 import {
-  connectSync,
-  disconnectSync,
-  getSyncInfo,
-  getSyncStatus,
-  subscribeSync,
-  syncNow,
-} from '../sync/engine';
-import { NewSyncSpaceError, type SyncInfo, type SyncStatus } from '../sync/types';
+  EQUIPMENT,
+  MUSCLE_GROUPS,
+  MUSCLE_GROUP_LABELS,
+  EQUIPMENT_LABELS,
+  EXERCISE_CATEGORY_LABELS,
+} from '../domain/catalogue/groups';
+import { loadCatalogue, searchExercises } from '../domain/catalogue/wger';
 import {
-  getNotificationStatus,
-  subscribeNotifications,
-  syncNotificationsNow,
-  testNotification,
-  type NotificationStatus,
-} from '../notifications/engine';
-import { allDaySlots } from '../notifications/schedule';
-import { isValidTopic, normalizeNtfyUrl } from '../notifications/ntfy';
+  downloadBackup,
+  readBackupFile,
+} from '../domain/backup';
+import type {
+  BackupFile,
+  EquipmentId,
+  Exercise,
+  MuscleGroupId,
+} from '../domain/types';
+import { useDebouncedValue } from '../state/hooks';
+import { useTrainer } from '../state/store';
+import { themeSettingOf } from '../state/theme';
 
-interface SettingsViewProps {
-  onOpenManual: () => void;
+type NoticeKind = 'ok' | 'warn' | 'error';
+
+interface Notice {
+  kind: NoticeKind;
+  text: string;
 }
 
-type Status = { tone: 'ok' | 'warn' | 'error'; text: string } | null;
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : 'Something went wrong. Try again.';
+}
 
-export function SettingsView({ onOpenManual }: SettingsViewProps) {
+function NoticeLine({ notice, onDismiss }: { notice: Notice; onDismiss: () => void }) {
+  return (
+    <div className={`notice notice--${notice.kind}`} role={notice.kind === 'error' ? 'alert' : 'status'}>
+      <span>{notice.text}</span>
+      <button type="button" className="notice__dismiss" onClick={onDismiss}>
+        Dismiss
+      </button>
+    </div>
+  );
+}
+
+function ToggleRow({
+  label,
+  hint,
+  checked,
+  onChange,
+}: {
+  label: string;
+  hint: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <div className="toggle-row">
+      <div className="toggle-row__copy">
+        <span className="toggle-row__label">{label}</span>
+        <span className="toggle-row__hint">{hint}</span>
+      </div>
+      <button
+        type="button"
+        role="switch"
+        className={`switch${checked ? ' switch--on' : ''}`}
+        aria-checked={checked}
+        aria-label={label}
+        onClick={() => onChange(!checked)}
+      >
+        <span className="switch__thumb" aria-hidden="true" />
+      </button>
+    </div>
+  );
+}
+
+function persistenceLabel(state: 'checking' | 'unsupported' | 'persistent' | 'best-effort') {
+  if (state === 'checking') return 'Checking…';
+  if (state === 'unsupported') return 'Unavailable in this browser';
+  if (state === 'persistent') return 'Persistent — protected from eviction';
+  return 'Best effort — the browser may evict data';
+}
+
+export function SettingsView() {
   const {
+    routines,
+    sessions,
+    customExercises,
     settings,
-    categories,
-    projects,
-    tasks,
-    places,
     updateSettings,
-    createCategory,
-    updateCategory,
-    deleteCategory,
+    deleteCustomExercise,
     buildBackup,
     restoreBackup,
     resetEverything,
-  } = useTasker();
+  } = useTrainer();
 
-  const [status, setStatus] = useState<Status>(null);
-  const [busy, setBusy] = useState(false);
-  const fileInput = useRef<HTMLInputElement>(null);
-
-  const [syncStatus, setSyncStatus] = useState<SyncStatus>(getSyncStatus);
-  const [syncInfo, setSyncInfo] = useState<SyncInfo | null>(null);
-  const [serverUrl, setServerUrl] = useState(
-    import.meta.env.VITE_SYNC_URL ?? 'https://tasker-api.asterki.xyz',
-  );
-  const [passphrase, setPassphrase] = useState('');
-  const [syncBusy, setSyncBusy] = useState(false);
-  const [confirmCreate, setConfirmCreate] = useState(false);
-
-  const [notifyStatus, setNotifyStatus] = useState<NotificationStatus>(getNotificationStatus);
-  const [notifyBusy, setNotifyBusy] = useState(false);
+  const [notice, setNotice] = useState<Notice | null>(null);
+  const [editorFor, setEditorFor] = useState<Exercise | 'new' | null>(null);
+  const [catalogue, setCatalogue] = useState<Exercise[]>([]);
+  const [catalogueFailed, setCatalogueFailed] = useState(false);
+  const [query, setQuery] = useState('');
+  const [muscleFilter, setMuscleFilter] = useState<MuscleGroupId | ''>('');
+  const [equipmentFilter, setEquipmentFilter] = useState<EquipmentId | ''>('');
+  const [deleteConfirm, setDeleteConfirm] = useState('');
+  const [pendingDelete, setPendingDelete] = useState<Exercise | null>(null);
+  const [pendingImport, setPendingImport] = useState<BackupFile | null>(null);
+  const [resetting, setResetting] = useState(false);
+  const [persistence, setPersistence] = useState<
+    'checking' | 'unsupported' | 'persistent' | 'best-effort'
+  >('checking');
+  const importRef = useRef<HTMLInputElement>(null);
+  const debouncedQuery = useDebouncedValue(query.trim(), 150);
 
   useEffect(() => {
-    const unsubscribe = subscribeSync(setSyncStatus);
-    void getSyncInfo().then(setSyncInfo);
-    return unsubscribe;
-  }, []);
-
-  useEffect(() => subscribeNotifications(setNotifyStatus), []);
-
-  const timezones = useMemo(() => {
-    const fallback = [
-      'UTC',
-      'America/New_York',
-      'America/Chicago',
-      'America/Denver',
-      'America/Los_Angeles',
-      'America/Mexico_City',
-      'Europe/London',
-      'Europe/Berlin',
-      'Europe/Madrid',
-      'Asia/Tokyo',
-      'Asia/Kolkata',
-      'Australia/Sydney',
-    ];
-    let supported: string[] = [];
-    try {
-      supported =
-        (Intl as unknown as { supportedValuesOf?: (key: string) => string[] }).supportedValuesOf?.(
-          'timeZone',
-        ) ?? [];
-    } catch {
-      /* older browser: use the short list */
-    }
-    return [...new Set([deviceTimezone(), 'UTC', ...(supported.length > 0 ? supported : fallback)])].sort();
-  }, []);
-
-  const timezoneValid = isValidTimezone(settings.timezone);
-  const allDayTimes = allDaySlots(settings.notifications.allDayCount);
-  const notificationTargetValid =
-    Boolean(normalizeNtfyUrl(settings.notifications.serverUrl)) &&
-    isValidTopic(settings.notifications.topic);
-
-  function patchNotifications(partial: Partial<NotificationSettings>) {
-    updateSettings({ notifications: { ...settings.notifications, ...partial } });
-  }
-
-  async function handleTestNotification() {
-    setNotifyBusy(true);
-    try {
-      await testNotification(settings);
-      setStatus({
-        tone: 'ok',
-        text: 'Test notification published. Check the ntfy app subscribed to your topic.',
+    let cancelled = false;
+    loadCatalogue(customExercises)
+      .then((rows) => {
+        if (cancelled) return;
+        setCatalogue(rows);
+        setCatalogueFailed(false);
+      })
+      .catch(() => {
+        if (!cancelled) setCatalogueFailed(true);
       });
-    } catch (error) {
-      setStatus({
-        tone: 'error',
-        text: error instanceof Error ? error.message : 'Could not send the test notification.',
-      });
-    } finally {
-      setNotifyBusy(false);
-    }
-  }
+    return () => {
+      cancelled = true;
+    };
+  }, [customExercises]);
 
-  async function handleRefreshNotifications() {
-    setNotifyBusy(true);
-    await syncNotificationsNow(settings, tasks, projects);
-    const next = getNotificationStatus();
-    setNotifyBusy(false);
-    setStatus(
-      next.error
-        ? { tone: 'error', text: next.error }
-        : {
-            tone: 'ok',
-            text: `Reminder schedule refreshed · ${next.scheduled} armed for the next two days.`,
-          },
-    );
-  }
-
-  const handleConnect = async (allowCreate: boolean) => {
-    setSyncBusy(true);
-    try {
-      const result = await connectSync(serverUrl, passphrase, allowCreate);
-      setSyncInfo(await getSyncInfo());
-      setPassphrase('');
-      setConfirmCreate(false);
-      setStatus({
-        tone: 'ok',
-        text: result.created ? 'New sync space created and linked.' : 'Connected. Your tasks are syncing.',
-      });
-    } catch (error) {
-      if (error instanceof NewSyncSpaceError) {
-        setConfirmCreate(true);
-        setStatus({
-          tone: 'warn',
-          text: 'This passphrase has no data on the relay yet. Create a space to start syncing with it.',
-        });
-      } else {
-        setStatus({
-          tone: 'error',
-          text: error instanceof Error ? error.message : 'Could not connect.',
-        });
+  useEffect(() => {
+    let cancelled = false;
+    const read = () => {
+      if (!navigator.storage?.persisted) {
+        if (!cancelled) setPersistence('unsupported');
+        return;
       }
-    } finally {
-      setSyncBusy(false);
-    }
-  };
+      navigator.storage
+        .persisted()
+        .then((persisted) => {
+          if (!cancelled) setPersistence(persisted ? 'persistent' : 'best-effort');
+        })
+        .catch(() => {
+          if (!cancelled) setPersistence('best-effort');
+        });
+    };
+    read();
+    const timer = window.setTimeout(read, 800);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, []);
 
-  const handleDisconnect = async () => {
-    setSyncBusy(true);
-    try {
-      await disconnectSync();
-      setSyncInfo(null);
-      setConfirmCreate(false);
-      setStatus({ tone: 'ok', text: 'Sync disconnected. Local data is untouched.' });
-    } finally {
-      setSyncBusy(false);
-    }
-  };
+  const results = useMemo(
+    () =>
+      searchExercises(catalogue, {
+        query: debouncedQuery,
+        muscle: muscleFilter || null,
+        equipment: equipmentFilter || null,
+        limit: 8,
+      }),
+    [catalogue, debouncedQuery, muscleFilter, equipmentFilter],
+  );
 
-  const patch = (partial: Partial<Settings>) => updateSettings(partial);
+  const customCount = customExercises.length;
 
-  const progress = settings.progress;
-  const level = levelForXp(progress.xp);
-  const streak = currentStreak(progress);
-  const doneToday = progress.todayDate === todayISO() ? progress.todayCount : 0;
-  const history = useMemo(() => completionsByDay(tasks, 14), [tasks]);
-  const peak = Math.max(1, ...history.map((day) => day.count));
-  const plannedToday = tasks.filter((task) => !task.completed && task.date === todayISO() && task.parentId === null).length;
-
-  function handleExport() {
-    const backup = buildBackup();
-    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = `tasker-backup-${new Date().toISOString().slice(0, 10)}.json`;
-    anchor.click();
-    URL.revokeObjectURL(url);
-    setStatus({
-      tone: 'ok',
-      text: `Exported ${backup.tasks.length} tasks, ${backup.projects.length} projects and ${backup.categories.length} categories.`,
+  function handleSaved(exercise: Exercise) {
+    setEditorFor(null);
+    setNotice({
+      kind: 'ok',
+      text: `${editorFor === 'new' ? 'Created' : 'Updated'} “${exercise.name}”.`,
     });
   }
 
-  async function handleImport(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    event.target.value = '';
-    if (!file) return;
-    setBusy(true);
+  async function confirmDelete() {
+    const exercise = pendingDelete;
+    if (!exercise) return;
+    setPendingDelete(null);
     try {
-      const parsed = JSON.parse(await file.text()) as BackupFile;
-      await restoreBackup(parsed);
-      setStatus({ tone: 'ok', text: `Restored ${parsed.tasks?.length ?? 0} tasks.` });
+      await deleteCustomExercise(exercise.id);
+      setNotice({ kind: 'ok', text: `Deleted “${exercise.name}”.` });
     } catch (error) {
-      setStatus({ tone: 'error', text: `Import failed: ${(error as Error).message}` });
+      setNotice({ kind: 'error', text: errorMessage(error) });
     }
-    setBusy(false);
+  }
+
+  function handleExport() {
+    try {
+      downloadBackup(buildBackup());
+      setNotice({ kind: 'ok', text: 'Backup downloaded.' });
+    } catch (error) {
+      setNotice({ kind: 'error', text: errorMessage(error) });
+    }
+  }
+
+  async function handleImport(file: File | undefined) {
+    if (!file) return;
+    try {
+      const backup = await readBackupFile(file);
+      setPendingImport(backup);
+    } catch (error) {
+      setNotice({ kind: 'error', text: errorMessage(error) });
+      if (importRef.current) importRef.current.value = '';
+    }
+  }
+
+  function cancelImport() {
+    setPendingImport(null);
+    if (importRef.current) importRef.current.value = '';
+  }
+
+  async function confirmImport() {
+    const backup = pendingImport;
+    if (!backup) return;
+    setPendingImport(null);
+    try {
+      await restoreBackup(backup);
+      setNotice({
+        kind: 'ok',
+        text: `Imported ${backup.routines.length} routines, ${backup.sessions.length} sessions and ${backup.customExercises.length} custom exercises.`,
+      });
+    } catch (error) {
+      setNotice({ kind: 'error', text: errorMessage(error) });
+    } finally {
+      if (importRef.current) importRef.current.value = '';
+    }
   }
 
   async function handleReset() {
-    if (!window.confirm('Erase every task, project, category and setting on this device?')) return;
-    setBusy(true);
-    await resetEverything();
-    setStatus({ tone: 'ok', text: 'All local data was erased.' });
-    setBusy(false);
-  }
-
-  function handleCategoryMenu(category: Category) {
-    const choice = window.prompt(
-      `“${category.name}”\n\n1 — Rename\n2 — Change colour\n3 — Delete\n\nEnter a number:`,
-      '1',
-    );
-    if (choice === '1') {
-      const name = window.prompt('New category name', category.name);
-      if (name?.trim()) updateCategory(category.id, { name: name.trim() });
-    } else if (choice === '2') {
-      const index = CATEGORY_COLORS.indexOf(category.color);
-      updateCategory(category.id, { color: CATEGORY_COLORS[(index + 1) % CATEGORY_COLORS.length] });
-    } else if (choice === '3') {
-      if (window.confirm(`Delete “${category.name}”? Its projects move to Uncategorised.`)) {
-        deleteCategory(category.id);
-      }
+    if (deleteConfirm !== 'DELETE') return;
+    setResetting(true);
+    try {
+      await resetEverything();
+    } catch (error) {
+      setResetting(false);
+      setNotice({ kind: 'error', text: errorMessage(error) });
     }
   }
 
   return (
-    <section className="view">
-      <header className="view__header">
+    <div className="view">
+      <header className="view__header view__header--hero">
         <div>
+          <span className="view__eyebrow">Settings</span>
           <h1 className="view__title">Settings</h1>
-          <p className="view__subtitle">Appearance, progress, workspace and data</p>
         </div>
-        <button type="button" className="button" onClick={onOpenManual}>
-          Open user manual
-        </button>
       </header>
 
-      {status && <div className={`notice notice--${status.tone}`}>{status.text}</div>}
+      {notice && <NoticeLine notice={notice} onDismiss={() => setNotice(null)} />}
 
-      <div className="card">
-        <h2 className="card__title">Progress</h2>
-        <div className="progress-head">
-          <div className="progress-level">
-            <span className="progress-level__badge">{level.level}</span>
-            <div>
-              <strong>Level {level.level}</strong>
-              <span className="muted">
-                {level.into} / {level.needed} XP to level {level.level + 1}
-              </span>
-            </div>
-          </div>
-          <div className="progress-bar" aria-hidden="true">
-            <span className="progress-bar__fill" style={{ width: `${Math.round(level.ratio * 100)}%` }} />
+      <section className="card settings-card" aria-labelledby="settings-appearance">
+        <div className="settings-card__head">
+          <span className="settings-card__icon">
+            {settings.theme === 'nordic-dark' ? <FiMoon aria-hidden="true" /> : <FiSun aria-hidden="true" />}
+          </span>
+          <div>
+            <h2 className="card__title" id="settings-appearance">
+              Appearance
+            </h2>
+            <p className="card__hint">Choose the surface that suits the room.</p>
           </div>
         </div>
 
-        <div className="stats">
-          <span className="stat">
-            <strong>{doneToday}</strong> done today
-            {plannedToday > 0 && <span className="muted"> / {plannedToday} planned</span>}
-          </span>
-          <span className="stat">
-            <strong>
-              <FiTrendingUp aria-hidden="true" /> {streak}
-            </strong>{' '}
-            day streak
-          </span>
-          <span className="stat">
-            <strong>{progress.bestStreak}</strong> best streak
-          </span>
-          <span className="stat">
-            <strong>{progress.totalCompleted}</strong> completed all time
-          </span>
-          <span className="stat">
-            <strong>{progress.xp}</strong> XP
-          </span>
-        </div>
-
-        <div className="settings-chart" aria-label="Completions over the last 14 days">
-          {history.map((day) => (
-            <span
-              key={day.date}
-              className={`settings-chart__col${day.count > 0 ? ' settings-chart__col--filled' : ''}`}
-              title={`${formatDateShort(day.date)} · ${day.count}`}
-            >
-              <span style={{ height: `${Math.max(4, (day.count / peak) * 100)}%` }} />
-            </span>
-          ))}
-        </div>
-
-        <div className="card__row">
-          <label className="switch switch--boxed">
-            <input
-              type="checkbox"
-              checked={settings.soundEnabled}
-              onChange={(event) => patch({ soundEnabled: event.target.checked })}
-            />
-            <span>Completion chime</span>
-          </label>
-          <label className="switch switch--boxed">
-            <input
-              type="checkbox"
-              checked={settings.hapticsEnabled}
-              onChange={(event) => patch({ hapticsEnabled: event.target.checked })}
-            />
-            <span>Haptic feedback</span>
-          </label>
-          <label className="field">
-            <span className="field__label">Theme</span>
-            <select
-              className="input"
-              value={settings.theme}
-              onChange={(event) => patch({ theme: event.target.value as Settings['theme'] })}
-            >
-              <option value="nordic-light">GitHub Light</option>
-              <option value="nordic-dark">GitHub Dark</option>
-            </select>
-          </label>
-        </div>
-
-        <div className="hud__achievements">
-          <span className="hud__section-title">
-            Achievements
-            <span className="hud__muted">
-              {progress.unlocked.length}/{ACHIEVEMENTS.length}
-            </span>
-          </span>
-          <div className="badge-grid">
-            {ACHIEVEMENTS.map((achievement) => {
-              const owned = progress.unlocked.includes(achievement.id);
-              return (
-                <span
-                  key={achievement.id}
-                  className={`badge${owned ? ' badge--owned' : ''}`}
-                  title={achievement.description}
-                >
-                  <span aria-hidden="true">{owned ? achievement.icon : <FiLock />}</span>
-                  {achievement.title}
-                </span>
-              );
-            })}
-          </div>
-        </div>
-      </div>
-
-      <div className="card">
-        <h2 className="card__title">Categories &amp; projects</h2>
-        <p className="card__hint">
-          Categories group projects; projects group tasks. Every task can nest subtasks to any depth.
-        </p>
-        {categories.length === 0 && <p className="muted">No categories yet.</p>}
-        <ul className="settings-list">
-          {categories.map((category) => (
-            <li key={category.id} className="settings-list__row">
-              <span className="dot" style={{ background: category.color }} />
-              <span className="settings-list__label">{category.name}</span>
-              <span className="muted">
-                {projects.filter((project) => project.categoryId === category.id).length} projects
-              </span>
-              <button type="button" className="link-button" onClick={() => handleCategoryMenu(category)}>
-                manage
-              </button>
-            </li>
-          ))}
-        </ul>
-        <div className="card__actions">
+        <div className="segmented" role="group" aria-label="Theme">
           <button
             type="button"
-            className="button"
-            onClick={() => {
-              const name = window.prompt('Category name — e.g. Work, Personal');
-              if (name?.trim()) createCategory(name.trim());
-            }}
+            className={`segmented__item${settings.theme === 'nordic-light' ? ' segmented__item--active' : ''}`}
+            onClick={() => void updateSettings({ theme: themeSettingOf('light') })}
+            aria-pressed={settings.theme === 'nordic-light'}
           >
-            New category
+            Light
+          </button>
+          <button
+            type="button"
+            className={`segmented__item${settings.theme === 'nordic-dark' ? ' segmented__item--active' : ''}`}
+            onClick={() => void updateSettings({ theme: themeSettingOf('dark') })}
+            aria-pressed={settings.theme === 'nordic-dark'}
+          >
+            Dark
           </button>
         </div>
-      </div>
+      </section>
 
-      <div className="card">
-        <h2 className="card__title">Data</h2>
-        <p className="card__hint">
-          Everything is stored locally in IndexedDB. Export a JSON snapshot to back up, import it to
-          restore. Import replaces the current state.
-        </p>
-        <div className="stats">
-          <span className="stat">
-            <strong>{tasks.length}</strong> tasks
+      <section className="card settings-card" aria-labelledby="settings-training">
+        <div className="settings-card__head">
+          <span className="settings-card__icon">
+            <FiActivity aria-hidden="true" />
           </span>
-          <span className="stat">
-            <strong>{projects.length}</strong> projects
-          </span>
-          <span className="stat">
-            <strong>{categories.length}</strong> categories
-          </span>
-          <span className="stat">
-            <strong>{places.length}</strong> places
-          </span>
-        </div>
-        <div className="card__actions">
-          <button type="button" className="button button--primary" onClick={handleExport}>
-            Export JSON
-          </button>
-          <button type="button" className="button" onClick={() => fileInput.current?.click()} disabled={busy}>
-            Import JSON
-          </button>
-          <button type="button" className="button button--danger" onClick={() => void handleReset()} disabled={busy}>
-            Reset app
-          </button>
-        </div>
-        <input
-          ref={fileInput}
-          type="file"
-          accept="application/json,.json"
-          hidden
-          onChange={(event) => void handleImport(event)}
-        />
-      </div>
-
-      <div className="card">
-        <h2 className="card__title">Sync</h2>
-        <p className="card__hint">
-          Optional end-to-end encrypted sync through your own relay. Your passphrase never leaves
-          this device; only ciphertext is stored on the server. Tasks, projects, settings, XP,
-          streaks and achievements all follow you. Lose the passphrase and the sync space cannot
-          be recovered.
-        </p>
-
-        {syncInfo ? (
-          <>
-            <dl className="about">
-              <div>
-                <dt>Relay</dt>
-                <dd>{syncInfo.serverUrl}</dd>
-              </div>
-              <div>
-                <dt>Space</dt>
-                <dd className="sync-fingerprint">{syncInfo.fingerprint}</dd>
-              </div>
-              <div>
-                <dt>Last sync</dt>
-                <dd>{syncInfo.lastSyncAt ? new Date(syncInfo.lastSyncAt).toLocaleString() : 'Not yet'}</dd>
-              </div>
-              <div>
-                <dt>Status</dt>
-                <dd>
-                  {syncStatus.state === 'syncing'
-                    ? 'Syncing…'
-                    : syncStatus.state === 'error'
-                      ? 'Needs attention'
-                      : 'Up to date'}
-                  {syncStatus.pending > 0 ? ` · ${syncStatus.pending} queued` : ''}
-                </dd>
-              </div>
-            </dl>
-            {syncStatus.error && <p className="card__hint">{syncStatus.error}</p>}
-            <div className="card__actions">
-              <button
-                type="button"
-                className="button button--primary"
-                onClick={() => void syncNow()}
-                disabled={syncStatus.state === 'syncing'}
-              >
-                Sync now
-              </button>
-              <button
-                type="button"
-                className="button"
-                onClick={() => void handleDisconnect()}
-                disabled={syncBusy}
-              >
-                Disconnect
-              </button>
-            </div>
-          </>
-        ) : (
-          <div className="sync-form">
-            <label className="field">
-              <span className="field__label">Relay URL</span>
-              <input
-                className="input"
-                type="url"
-                value={serverUrl}
-                onChange={(event) => setServerUrl(event.target.value)}
-                placeholder="https://tasker-api.example.com"
-                autoComplete="off"
-                spellCheck={false}
-              />
-            </label>
-            <label className="field">
-              <span className="field__label">Passphrase</span>
-              <input
-                className="input"
-                type="password"
-                value={passphrase}
-                onChange={(event) => setPassphrase(event.target.value)}
-                placeholder="At least 8 characters"
-                autoComplete="new-password"
-              />
-            </label>
-            <div className="card__actions">
-              <button
-                type="button"
-                className="button button--primary"
-                onClick={() => void handleConnect(false)}
-                disabled={syncBusy || passphrase.trim().length < 8}
-              >
-                Connect
-              </button>
-              {confirmCreate && (
-                <button
-                  type="button"
-                  className="button button--danger"
-                  onClick={() => void handleConnect(true)}
-                  disabled={syncBusy}
-                >
-                  Create new space
-                </button>
-              )}
-            </div>
+          <div>
+            <h2 className="card__title" id="settings-training">
+              Training
+            </h2>
+            <p className="card__hint">Feedback while you log sets.</p>
           </div>
-        )}
-      </div>
+        </div>
 
-      <div className="card">
-        <h2 className="card__title">
-          <FiBell aria-hidden="true" /> Notifications
-        </h2>
-        <p className="card__hint">
-          Tasker publishes reminders straight to <a href="https://ntfy.sh" target="_blank" rel="noreferrer">ntfy</a>.
-          Install the ntfy app on your phone or desktop and subscribe to the same topic. Tasks with a
-          time remind you at that exact time; tasks with a date but no time use the per-day schedule
-          below.
-        </p>
+        <div className="toggle-list">
+          <ToggleRow
+            label="Sound"
+            hint="Play a short cue when a set is completed."
+            checked={settings.soundEnabled}
+            onChange={(checked) => void updateSettings({ soundEnabled: checked })}
+          />
+          <ToggleRow
+            label="Haptics"
+            hint="Use a short vibration on supported phones."
+            checked={settings.hapticsEnabled}
+            onChange={(checked) => void updateSettings({ hapticsEnabled: checked })}
+          />
+        </div>
+      </section>
 
-        <div className="card__row">
-          <label className="switch switch--boxed">
-            <input
-              type="checkbox"
-              checked={settings.notifications.enabled}
-              onChange={(event) => patchNotifications({ enabled: event.target.checked })}
-            />
-            <span>Enable ntfy reminders</span>
-          </label>
+      <section className="card settings-card" aria-labelledby="settings-exercises">
+        <div className="settings-card__head">
+          <span className="settings-card__icon">
+            <FiList aria-hidden="true" />
+          </span>
+          <div>
+            <h2 className="card__title" id="settings-exercises">
+              Exercises
+            </h2>
+            <p className="card__hint">
+              {catalogue.length > 0
+                ? `${catalogue.length} exercises available, ${customCount} custom.`
+                : `${customCount} custom exercises.`}
+            </p>
+          </div>
+          <button
+            type="button"
+            className="button button--primary settings-card__action"
+            onClick={() => setEditorFor('new')}
+          >
+            <FiPlus aria-hidden="true" /> New exercise
+          </button>
+        </div>
 
+        <div className="search-field">
+          <FiSearch aria-hidden="true" />
+          <input
+            className="input"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search the exercise catalogue"
+            aria-label="Search exercises"
+          />
+        </div>
+
+        <div className="catalogue-filters">
           <label className="field">
-            <span className="field__label">Time zone</span>
-            <div className="field__row">
-              <input
-                className="input"
-                list="tasker-timezones"
-                value={settings.timezone}
-                onChange={(event) => updateSettings({ timezone: event.target.value })}
-                placeholder="Europe/Madrid"
-                spellCheck={false}
-                autoComplete="off"
-              />
-              <button
-                type="button"
-                className="button"
-                onClick={() => updateSettings({ timezone: deviceTimezone() })}
-              >
-                Device
-              </button>
-            </div>
-            <datalist id="tasker-timezones">
-              {timezones.map((zone) => (
-                <option key={zone} value={zone} />
-              ))}
-            </datalist>
-            <span className="notification-hint">
-              {timezoneValid
-                ? `Now: ${formatInTimezone(Date.now(), settings.timezone)}`
-                : 'Unknown zone — use an IANA name such as Europe/Madrid.'}
-            </span>
-          </label>
-
-          <label className="field">
-            <span className="field__label">All-day reminders</span>
+            <span className="field__label">Muscle</span>
             <select
               className="input"
-              value={settings.notifications.allDayCount}
-              onChange={(event) =>
-                patchNotifications({ allDayCount: Number(event.target.value) })
-              }
+              value={muscleFilter}
+              onChange={(event) => setMuscleFilter(event.target.value as MuscleGroupId | '')}
             >
-              {[1, 2, 3, 4, 5].map((count) => (
-                <option key={count} value={count}>
-                  {count}× per day
+              <option value="">Any muscle</option>
+              {MUSCLE_GROUPS.map((muscle) => (
+                <option key={muscle.id} value={muscle.id}>
+                  {muscle.label}
                 </option>
               ))}
             </select>
-            <span className="notification-hint">At {allDayTimes.map(formatTime).join(', ')}</span>
+          </label>
+          <label className="field">
+            <span className="field__label">Equipment</span>
+            <select
+              className="input"
+              value={equipmentFilter}
+              onChange={(event) => setEquipmentFilter(event.target.value as EquipmentId | '')}
+            >
+              <option value="">Any equipment</option>
+              {EQUIPMENT.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
           </label>
         </div>
 
-        <div className="sync-form">
-          <label className="field">
-            <span className="field__label">ntfy server</span>
-            <input
-              className="input"
-              type="url"
-              value={settings.notifications.serverUrl}
-              onChange={(event) => patchNotifications({ serverUrl: event.target.value })}
-              placeholder="https://ntfy.sh"
-              spellCheck={false}
-              autoComplete="off"
-            />
-          </label>
-          <label className="field">
-            <span className="field__label">Topic</span>
-            <input
-              className="input"
-              value={settings.notifications.topic}
-              onChange={(event) => patchNotifications({ topic: event.target.value })}
-              placeholder="tasker-8f3k2m"
-              spellCheck={false}
-              autoComplete="off"
-            />
-          </label>
-          <label className="field">
-            <span className="field__label">Access token · optional</span>
-            <input
-              className="input"
-              type="password"
-              value={settings.notifications.token}
-              onChange={(event) => patchNotifications({ token: event.target.value })}
-              placeholder="tk_…"
-              autoComplete="new-password"
-            />
-          </label>
+        {catalogueFailed && (
+          <p className="settings-note">The catalogue could not be loaded. Custom exercises still work.</p>
+        )}
+
+        {debouncedQuery || muscleFilter || equipmentFilter ? (
+          <div className="catalogue-results" aria-live="polite">
+            {results.length === 0 ? (
+              <p className="empty-note">
+                {debouncedQuery ? `No exercises match “${debouncedQuery}”.` : 'No exercises match those filters.'}
+              </p>
+            ) : (
+              results.map((exercise) => (
+                <div className="catalogue-result" key={exercise.id}>
+                  <div className="catalogue-result__main">
+                    <span className="catalogue-result__name">{exercise.name}</span>
+                    <span className="catalogue-result__meta">
+                      {EXERCISE_CATEGORY_LABELS[exercise.category]} ·{' '}
+                      {exercise.primaryMuscles.map((muscle) => MUSCLE_GROUP_LABELS[muscle]).join(', ')}
+                      {exercise.equipment.length > 0 &&
+                        ` · ${exercise.equipment.map((item) => EQUIPMENT_LABELS[item]).join(', ')}`}
+                    </span>
+                  </div>
+                  <span className="badge badge--quiet">
+                    {exercise.source === 'custom' ? 'Custom' : 'wger'}
+                  </span>
+                </div>
+              ))
+            )}
+          </div>
+        ) : (
+          <p className="settings-note">
+            Search the catalogue to check names before creating a custom exercise.
+          </p>
+        )}
+
+        <div className="settings-subhead">
+          <h3 className="settings-subhead__title">Custom exercises</h3>
         </div>
 
-        <p className="card__hint">
-          The topic works like a password. Use a long random topic, or self-host ntfy and require an
-          access token. Reminders are armed two days ahead and refreshed whenever Tasker opens, so
-          longer-range tasks need the app to be opened occasionally. The token is included in JSON
-          backups and encrypted sync.
+        {customExercises.length === 0 ? (
+          <p className="empty-note">
+            No custom exercises yet. Create one when the catalogue lacks a movement you use.
+          </p>
+        ) : (
+          <ul className="exercise-list">
+            {customExercises.map((exercise) => (
+              <li className="exercise-row" key={exercise.id}>
+                <div className="exercise-row__main">
+                  <span className="exercise-row__name">{exercise.name}</span>
+                  <span className="exercise-row__meta">
+                    {EXERCISE_CATEGORY_LABELS[exercise.category]} ·{' '}
+                    {exercise.primaryMuscles.map((muscle) => MUSCLE_GROUP_LABELS[muscle]).join(', ')}
+                  </span>
+                </div>
+                <div className="exercise-row__actions">
+                  <button
+                    type="button"
+                    className="icon-button"
+                    onClick={() => setEditorFor(exercise)}
+                    aria-label={`Edit ${exercise.name}`}
+                    title="Edit"
+                  >
+                    <FiEdit2 aria-hidden="true" />
+                  </button>
+                  <button
+                    type="button"
+                    className="icon-button icon-button--danger"
+                    onClick={() => setPendingDelete(exercise)}
+                    aria-label={`Delete ${exercise.name}`}
+                    title="Delete"
+                  >
+                    <FiTrash2 aria-hidden="true" />
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section className="card settings-card" aria-labelledby="settings-data">
+        <div className="settings-card__head">
+          <span className="settings-card__icon">
+            <FiDatabase aria-hidden="true" />
+          </span>
+          <div>
+            <h2 className="card__title" id="settings-data">
+              Data
+            </h2>
+            <p className="card__hint">Portable, local and entirely yours.</p>
+          </div>
+        </div>
+
+        <dl className="data-stats">
+          <div>
+            <dt>Routines</dt>
+            <dd>{routines.length}</dd>
+          </div>
+          <div>
+            <dt>Sessions</dt>
+            <dd>{sessions.length}</dd>
+          </div>
+          <div>
+            <dt>Custom exercises</dt>
+            <dd>{customExercises.length}</dd>
+          </div>
+          <div>
+            <dt>Storage</dt>
+            <dd>{persistenceLabel(persistence)}</dd>
+          </div>
+        </dl>
+
+        <div className="settings-actions">
+          <button type="button" className="button" onClick={handleExport}>
+            <FiDownload aria-hidden="true" /> Export backup
+          </button>
+          <button type="button" className="button" onClick={() => importRef.current?.click()}>
+            <FiUpload aria-hidden="true" /> Import backup
+          </button>
+          <input
+            ref={importRef}
+            type="file"
+            accept="application/json,.json"
+            className="visually-hidden"
+            onChange={(event) => void handleImport(event.target.files?.[0])}
+          />
+        </div>
+        <p className="settings-note">
+          Import is replace-only and blocked while sync is connected. Backup files contain routines,
+          sessions, custom exercises and settings — never the seeded catalogue.
         </p>
 
-        <div className="notification-status">
-          <span>
-            {notifyStatus.state === 'scheduling'
-              ? 'Scheduling reminders…'
-              : notifyStatus.state === 'error'
-                ? 'Reminder delivery needs attention'
-                : !settings.notifications.enabled
-                  ? 'Reminders are off'
-                  : !notificationTargetValid
-                    ? 'Add a valid ntfy server and topic to start'
-                    : notifyStatus.scheduled > 0
-                      ? `${notifyStatus.scheduled} reminder${notifyStatus.scheduled === 1 ? '' : 's'} armed for the next two days`
-                      : 'No upcoming reminders in the next two days'}
+        <div className="danger-zone">
+          <div>
+            <h3 className="settings-subhead__title">Delete all Trainer data</h3>
+            <p className="settings-note">
+              Removes the Trainer database from this browser. It never touches another app's data.
+              Type <strong>DELETE</strong> to enable the button.
+            </p>
+          </div>
+          <div className="danger-zone__action">
+            <label className="field__label" htmlFor="delete-confirm">
+              Confirmation
+            </label>
+            <input
+              id="delete-confirm"
+              className="input"
+              value={deleteConfirm}
+              onChange={(event) => setDeleteConfirm(event.target.value)}
+              placeholder="DELETE"
+              autoComplete="off"
+            />
+            <button
+              type="button"
+              className="button button--danger"
+              disabled={deleteConfirm !== 'DELETE' || resetting}
+              onClick={() => void handleReset()}
+            >
+              <FiTrash2 aria-hidden="true" /> {resetting ? 'Deleting…' : 'Delete all Trainer data'}
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section className="card settings-card" aria-labelledby="settings-about">
+        <div className="settings-about">
+          <span className="settings-about__mark">
+            <BrandMark />
           </span>
-          {notifyStatus.lastSyncAt > 0 && (
-            <span className="muted">
-              Refreshed {new Date(notifyStatus.lastSyncAt).toLocaleTimeString()}
-            </span>
-          )}
+          <div>
+            <h2 className="card__title" id="settings-about">
+              About Trainer
+            </h2>
+            <p className="card__hint">A local-first routine builder and workout logger.</p>
+          </div>
         </div>
-        {notifyStatus.error && <p className="notification-error">{notifyStatus.error}</p>}
 
-        <div className="card__actions">
-          <button
-            type="button"
-            className="button button--primary"
-            onClick={() => void handleTestNotification()}
-            disabled={notifyBusy || !notificationTargetValid}
-          >
-            Send test notification
-          </button>
-          <button
-            type="button"
-            className="button"
-            onClick={() => void handleRefreshNotifications()}
-            disabled={notifyBusy}
-          >
-            Refresh schedule
-          </button>
-        </div>
-      </div>
-
-      <div className="card">
-        <h2 className="card__title">About</h2>
-        <dl className="about">
+        <dl className="about-list">
           <div>
             <dt>Version</dt>
             <dd>{__APP_VERSION__}</dd>
           </div>
           <div>
-            <dt>Build mode</dt>
-            <dd>{__APP_MODE__}</dd>
-          </div>
-          <div>
-            <dt>Built</dt>
-            <dd>{new Date(__BUILD_TIME__).toLocaleString()}</dd>
-          </div>
-          <div>
             <dt>Storage</dt>
-            <dd>IndexedDB (local-first)</dd>
+            <dd>This browser (IndexedDB)</dd>
+          </div>
+          <div>
+            <dt>Account</dt>
+            <dd>Not required</dd>
+          </div>
+          <div>
+            <dt>Offline</dt>
+            <dd>Installable PWA; the shell and last loaded catalogue work offline.</dd>
           </div>
         </dl>
-      </div>
-    </section>
+
+        <p className="settings-note">
+          <FiInfo aria-hidden="true" /> Trainer has no in-app AI and no reminder engine. Sound and
+          haptics are used only while logging sets in a later stage.
+        </p>
+
+        <div className="catalogue-attribution">
+          <h3 className="settings-subhead__title">Exercise catalogue</h3>
+          <p className="settings-note">
+            Exercise text and metadata come from{' '}
+            <a href="https://wger.de" target="_blank" rel="noreferrer">
+              wger
+            </a>{' '}
+            under{' '}
+            <a
+              href="https://creativecommons.org/licenses/by-sa/4.0/deed.en"
+              target="_blank"
+              rel="noreferrer"
+            >
+              CC BY-SA 4.0
+            </a>
+            ,{' '}
+            <a
+              href="https://creativecommons.org/licenses/by-sa/3.0/deed.en"
+              target="_blank"
+              rel="noreferrer"
+            >
+              CC BY-SA 3.0
+            </a>{' '}
+            and{' '}
+            <a
+              href="https://creativecommons.org/publicdomain/zero/1.0/"
+              target="_blank"
+              rel="noreferrer"
+            >
+              CC0
+            </a>{' '}
+            terms. Trainer maps names into its own taxonomy, strips HTML and bundles no images. See{' '}
+            <code>ATTRIBUTION.md</code> in the source repository for authors and license details.
+          </p>
+        </div>
+      </section>
+
+      <BottomSheet
+        open={editorFor !== null}
+        title={editorFor === 'new' ? 'New exercise' : 'Edit exercise'}
+        onClose={() => setEditorFor(null)}
+      >
+        {editorFor !== null && (
+          <CustomExerciseForm
+            key={editorFor === 'new' ? 'new' : editorFor.id}
+            exercise={editorFor === 'new' ? undefined : editorFor}
+            onClose={() => setEditorFor(null)}
+            onSaved={handleSaved}
+          />
+        )}
+      </BottomSheet>
+
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        title="Delete exercise?"
+        confirmLabel="Delete exercise"
+        tone="danger"
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={() => void confirmDelete()}
+      >
+        <p>
+          Delete “{pendingDelete?.name}”? Existing sessions keep their exercise snapshots. You can
+          recreate the exercise later, but its id will change.
+        </p>
+      </ConfirmDialog>
+
+      <ConfirmDialog
+        open={pendingImport !== null}
+        title="Replace all Trainer data?"
+        confirmLabel="Replace data"
+        tone="danger"
+        onCancel={cancelImport}
+        onConfirm={() => void confirmImport()}
+      >
+        <p>
+          This device: {routines.length} routines, {sessions.length} sessions,{' '}
+          {customExercises.length} custom exercises.
+        </p>
+        <p>
+          Backup: {pendingImport?.routines.length ?? 0} routines,{' '}
+          {pendingImport?.sessions.length ?? 0} sessions,{' '}
+          {pendingImport?.customExercises.length ?? 0} custom exercises.
+        </p>
+        <p>Import is replace-only. This cannot be undone.</p>
+      </ConfirmDialog>
+    </div>
   );
 }

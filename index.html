@@ -1,21 +1,41 @@
 <!doctype html>
-<html lang="en" data-theme="nordic-dark">
+<html lang="en" data-theme="light">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="description" content="Tasker — a local-first, offline-capable todo and planning app with natural-language capture, calendar and roadmap views." />
-    <meta name="color-scheme" content="dark light" />
-    <meta name="theme-color" content="#f6f8fa" media="(prefers-color-scheme: light)" />
-    <meta name="theme-color" content="#0d1117" media="(prefers-color-scheme: dark)" />
+    <meta
+      name="description"
+      content="Trainer — a local-first routine builder and workout logger. Plan your training cycle and log every set."
+    />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#F7F8F9" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#101418" media="(prefers-color-scheme: dark)" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-    <meta name="apple-mobile-web-app-title" content="Tasker" />
+    <meta name="apple-mobile-web-app-title" content="Trainer" />
 
     <link rel="manifest" href="/manifest.webmanifest" />
-    <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
-    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icons/trainer-192.png" />
+    <link rel="apple-touch-icon" href="/icons/trainer-192.png" />
 
-    <title>Tasker</title>
+    <title>Trainer</title>
+
+    <script>
+      // Match the system palette before first paint. Trainer's saved settings
+      // replace this immediately after the database opens; no theme is stored
+      // in localStorage.
+      (function () {
+        try {
+          document.documentElement.dataset.theme = window.matchMedia(
+            '(prefers-color-scheme: dark)',
+          ).matches
+            ? 'dark'
+            : 'light';
+        } catch {
+          /* matchMedia may be unavailable in unusual embeddings */
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
