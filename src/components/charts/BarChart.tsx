@@ -104,7 +104,7 @@ export function BarChart({
           })}
         </svg>
         <details className="chart-table">
-          <summary>View data table</summary>
+          <summary>Chart data</summary>
           <table>
             <caption>{ariaLabel}</caption>
             <thead>
@@ -153,10 +153,10 @@ export function BarChart({
         role="img"
         aria-label={ariaLabel}
       >
-        {[0, 0.5, 1].map((fraction) => {
-          const y = top + plotHeight - plotHeight * fraction;
+        {[...new Set([0, Math.round(max / 2), max])].map((value) => {
+          const y = top + plotHeight - plotHeight * (value / max);
           return (
-            <g key={fraction}>
+            <g key={value}>
               <line
                 className="chart__grid"
                 x1={left}
@@ -165,7 +165,7 @@ export function BarChart({
                 y2={y}
               />
               <text className="chart__axis" x={left - 8} y={y + 4} textAnchor="end">
-                {valueFormat(max * fraction)}
+                {valueFormat(value)}
               </text>
             </g>
           );
@@ -216,7 +216,7 @@ export function BarChart({
         })}
       </svg>
       <details className="chart-table">
-        <summary>View data table</summary>
+        <summary>Chart data</summary>
         <table>
           <caption>{ariaLabel}</caption>
           <thead>

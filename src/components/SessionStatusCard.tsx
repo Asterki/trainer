@@ -9,6 +9,8 @@ import {
 } from '../domain/session';
 import type { ResolvedSlot } from '../domain/routine';
 import type { IsoDate, Routine, Session } from '../domain/types';
+import { formatVolume } from '../domain/units';
+import { useTrainer } from '../state/store';
 
 interface SessionStatusCardProps {
   session: Session | null;
@@ -30,7 +32,7 @@ function routineLine(routine: Routine | null, session: Session | null): string |
     return [session.routineName, week].filter(Boolean).join(' · ');
   }
   if (!routine) return null;
-  return `${routine.name} · ${routine.weekCount} ${routine.weekCount === 1 ? 'week' : 'weeks'}`;
+  return `${routine.name} · ${routine.weekCount}-week cycle`;
 }
 
 export function SessionStatusCard({
@@ -46,6 +48,8 @@ export function SessionStatusCard({
   onReopen,
   onViewHistory,
 }: SessionStatusCardProps) {
+  const { settings } = useTrainer();
+  const unit = settings.weightUnit;
   const line = routineLine(routine, session);
   const derived = session ? deriveSessionStatus(session) : null;
   const sets = session ? sessionSetCount(session) : 0;
@@ -185,8 +189,10 @@ export function SessionStatusCard({
               <span className="session-status__metric-label">sets logged</span>
             </div>
             <div>
-              <span className="session-status__metric-value">{volume.toLocaleString()}</span>
-              <span className="session-status__metric-label">kg volume</span>
+              <span className="session-status__metric-value">
+                {formatVolume(volume, unit)}
+              </span>
+              <span className="session-status__metric-label">{unit} volume</span>
             </div>
           </div>
           {!isCompleted && target > 0 ? (
@@ -209,7 +215,7 @@ export function SessionStatusCard({
           <p className="session-summary__title">Workout complete</p>
           <p className="session-summary__copy">
             {trained} {trained === 1 ? 'exercise' : 'exercises'} trained · {sets}{' '}
-            {sets === 1 ? 'set' : 'sets'} · {volume.toLocaleString()} kg volume
+            {sets === 1 ? 'set' : 'sets'} · {formatVolume(volume, unit)} {unit} volume
           </p>
           <div className="session-status__actions">
             <button type="button" className="button" onClick={onReopen}>

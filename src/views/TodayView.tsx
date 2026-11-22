@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import { FiSave } from 'react-icons/fi';
+import { FiZap } from 'react-icons/fi';
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { ExerciseInfoSheet } from '../components/ExerciseInfoSheet';
 import { ExercisePickerSheet } from '../components/ExercisePickerSheet';
+import { FuturePlanSheet } from '../components/FuturePlanSheet';
 import { FinishBar } from '../components/FinishBar';
 import { SessionDetailSheet } from '../components/SessionDetailSheet';
 import { SessionExerciseCard } from '../components/SessionExerciseCard';
@@ -9,13 +11,14 @@ import { SessionStatusCard } from '../components/SessionStatusCard';
 import { WeekStrip } from '../components/WeekStrip';
 import { fromIsoDate } from '../domain/date';
 import { loadCatalogue } from '../domain/catalogue/wger';
+import { FEELINGS, sessionFeeling, trainingStreak } from '../domain/metrics';
 import { resolveSlot } from '../domain/routine';
 import {
   deriveSessionStatus,
   isSessionEditable,
   sessionSetCount,
 } from '../domain/session';
-import type { Exercise, IsoDate } from '../domain/types';
+import type { Exercise, IsoDate, SessionExercise } from '../domain/types';
 import { useActiveRoutine, useSessionByDate } from '../state/hooks';
 import { useTrainer } from '../state/store';
 
@@ -45,7 +48,9 @@ export function TodayView({ today, onBuildRoutine, onViewHistory }: TodayViewPro
     completeSession,
     reopenSession,
     updateSessionNotes,
+    updateSessionRating,
     createAdHocSession,
+    ensureSessionForDate,
   } = useTrainer();
   const routine = useActiveRoutine();
   const session = useSessionByDate(today);
@@ -53,9 +58,13 @@ export function TodayView({ today, onBuildRoutine, onViewHistory }: TodayViewPro
   const editable = session ? isSessionEditable(session, today) : false;
   const [catalogue, setCatalogue] = useState<Exercise[]>([]);
   const [editMode, setEditMode] = useState(false);
-  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerDate, setPickerDate] = useState<IsoDate | null>(null);
+  const [planDate, setPlanDate] = useState<IsoDate | null>(null);
   const [detailDate, setDetailDate] = useState<IsoDate | null>(null);
+  const [info, setInfo] = useState<{ exercise: Exercise; row: SessionExercise } | null>(null);
   const detailSession = useSessionByDate(detailDate);
+  const pickerSession = useSessionByDate(pickerDate);
+  const planSession = useSessionByDate(planDate);
   const [pending, setPending] = useState<PendingConfirm>(null);
   const [saving, setSaving] = useState(0);
   const [notes, setNotes] = useState('');
@@ -107,6 +116,7 @@ export function TodayView({ today, onBuildRoutine, onViewHistory }: TodayViewPro
 
   const sets = session ? sessionSetCount(session) : 0;
   const derived = session ? deriveSessionStatus(session) : null;
+  const streak = trainingStreak(sessions, today).current;
   const readOnly = session ? !editable : false;
   const showFinish =
     Boolean(session) &&
@@ -122,10 +132,20 @@ export function TodayView({ today, onBuildRoutine, onViewHistory }: TodayViewPro
   async function handleAdHoc() {
     try {
       await createAdHocSession();
-      setPickerOpen(true);
+      setPickerDate(today);
     } catch {
       /* The store surfaces the error. */
     }
+  }
+
+  async function openDay(date: IsoDate) {
+    if (date < today) {
+      setDetailDate(date);
+      return;
+    }
+    if (date === today) return;
+    const target = await ensureSessionForDate(date);
+    if (target) setPlanDate(date);
   }
 
   async function confirmPending() {
@@ -171,17 +191,22 @@ export function TodayView({ today, onBuildRoutine, onViewHistory }: TodayViewPro
           <h1 className="view__title">{dateLabel}</h1>
           <p className="view__subtitle">
             {routine
-              ? `${routine.name} · ${routine.weekCount} ${routine.weekCount === 1 ? 'week' : 'weeks'}`
+              ? `${routine.name} · ${routine.weekCount}-week cycle`
               : 'No active routine yet.'}
           </p>
         </div>
+        {streak > 0 && (
+          <span className="streak-chip" title={`${streak} completed workouts in a row`}>
+            <FiZap aria-hidden="true" /> {streak} workout streak
+          </span>
+        )}
       </header>
 
       <WeekStrip
         today={today}
         routine={routine}
         sessions={sessions}
-        onSelectDate={(date) => setDetailDate(date)}
+        onSelectDate={(date) => void openDay(date)}
       />
 
       {toast ? (
@@ -199,7 +224,7 @@ export function TodayView({ today, onBuildRoutine, onViewHistory }: TodayViewPro
             today={today}
             editMode={editMode}
             onToggleEdit={() => setEditMode((current) => !current)}
-            onAddExercises={() => setPickerOpen(true)}
+            onAddExercises={() => setPickerDate(today)}
             onLogAdHoc={() => void handleAdHoc()}
             onBuildRoutine={onBuildRoutine}
             onReopen={() => {
@@ -242,6 +267,7 @@ export function TodayView({ today, onBuildRoutine, onViewHistory }: TodayViewPro
                 });
               }}
               onSavingChange={handleSavingChange}
+              onOpenDetails={(exercise) => setInfo({ exercise, row })}
             />
           ))}
 
@@ -251,7 +277,7 @@ export function TodayView({ today, onBuildRoutine, onViewHistory }: TodayViewPro
               <p className="card__hint">
                 Add exercises yourself, or leave this session for the n8n workflow to fill.
               </p>
-              <button type="button" className="button" onClick={() => setPickerOpen(true)}>
+              <button type="button" className="button" onClick={() => setPickerDate(today)}>
                 Add exercises
               </button>
             </div>
@@ -263,9 +289,6 @@ export function TodayView({ today, onBuildRoutine, onViewHistory }: TodayViewPro
                 <h2 className="card__title" id="session-notes-title">
                   Session notes
                 </h2>
-                <span className="session-notes__hint">
-                  <FiSave aria-hidden="true" /> Saved automatically
-                </span>
               </div>
               <label className="field">
                 <span className="visually-hidden">Session notes</span>
@@ -292,6 +315,40 @@ export function TodayView({ today, onBuildRoutine, onViewHistory }: TodayViewPro
               <p className="session-notes__readonly">{session.notes}</p>
             </section>
           ) : null}
+
+          {session && (editable || session.rating !== null) ? (
+            <section className="card session-rating" aria-labelledby="session-rating-title">
+              <div className="session-notes__head">
+                <h2 className="card__title" id="session-rating-title">
+                  How did that leave you?
+                </h2>
+              </div>
+              {editable ? (
+                <div className="rating-scale" role="group" aria-label="How did that leave you?">
+                  {FEELINGS.map((label, index) => {
+                    const value = index + 1;
+                    const active = session.rating === value;
+                    return (
+                      <button
+                        key={label}
+                        type="button"
+                        className={`rating-scale__item${active ? ' rating-scale__item--active' : ''}`}
+                        aria-pressed={active}
+                        onClick={() => void updateSessionRating(session.id, active ? null : value)}
+                      >
+                        <span className="rating-scale__value">{value}</span>
+                        <span className="rating-scale__label">{label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="session-rating__readonly">
+                  {sessionFeeling(session.rating)} · {session.rating}/5
+                </p>
+              )}
+            </section>
+          ) : null}
         </div>
       </div>
 
@@ -299,17 +356,36 @@ export function TodayView({ today, onBuildRoutine, onViewHistory }: TodayViewPro
         <FinishBar sets={sets} disabled={saving > 0} onFinish={() => void handleFinish()} />
       )}
 
+      <FuturePlanSheet
+        session={planSession}
+        catalogue={byId}
+        onClose={() => setPlanDate(null)}
+        onAddExercise={() => setPickerDate(planDate)}
+        onOpenDetails={(exercise, row) => setInfo({ exercise, row })}
+      />
+
       <ExercisePickerSheet
-        open={pickerOpen}
-        session={session}
-        onClose={() => setPickerOpen(false)}
+        open={pickerDate !== null}
+        session={pickerSession}
+        onClose={() => setPickerDate(null)}
         onAdd={async (exercise) => {
-          if (!session) throw new Error('No session to add to.');
-          await addSessionExercise(session.id, exercise);
+          if (!pickerSession) throw new Error('No session to add to.');
+          await addSessionExercise(pickerSession.id, exercise);
+        }}
+        onRemove={async (rowId) => {
+          if (!pickerSession) throw new Error('No session to edit.');
+          await removeSessionExercise(pickerSession.id, rowId);
         }}
       />
 
       <SessionDetailSheet session={detailSession} onClose={() => setDetailDate(null)} />
+
+      <ExerciseInfoSheet
+        exercise={info?.exercise ?? null}
+        primary={info?.row.primaryMuscles ?? []}
+        secondary={info?.row.secondaryMuscles ?? []}
+        onClose={() => setInfo(null)}
+      />
 
       <ConfirmDialog
         open={pending !== null}

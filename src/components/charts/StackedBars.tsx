@@ -46,13 +46,13 @@ export function StackedBars({ data, ariaLabel }: StackedBarsProps) {
         role="img"
         aria-label={ariaLabel}
       >
-        {[0, 0.5, 1].map((fraction) => {
-          const y = top + plotHeight - plotHeight * fraction;
+        {[...new Set([0, Math.round(max / 2), max])].map((value) => {
+          const y = top + plotHeight - plotHeight * (value / max);
           return (
-            <g key={fraction}>
+            <g key={value}>
               <line className="chart__grid" x1={left} x2={width - right} y1={y} y2={y} />
               <text className="chart__axis" x={left - 8} y={y + 4} textAnchor="end">
-                {Math.round(max * fraction)}
+                {value}
               </text>
             </g>
           );
@@ -128,7 +128,7 @@ export function StackedBars({ data, ariaLabel }: StackedBarsProps) {
         </span>
       </p>
       <details className="chart-table">
-        <summary>View data table</summary>
+        <summary>Chart data</summary>
         <table>
           <caption>{ariaLabel}</caption>
           <thead>

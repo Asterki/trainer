@@ -1,9 +1,12 @@
 import { useState } from 'react';
 import { fromIsoDate } from '../domain/date';
 import type { PrEntry } from '../domain/metrics';
+import type { WeightUnit } from '../domain/types';
+import { formatWeight } from '../domain/units';
 
 interface PrTableProps {
   prs: PrEntry[];
+  unit: WeightUnit;
   onOpenSession?: (sessionId: string) => void;
 }
 
@@ -15,7 +18,7 @@ function formatDate(value: string): string {
   }).format(fromIsoDate(value));
 }
 
-export function PrTable({ prs, onOpenSession }: PrTableProps) {
+export function PrTable({ prs, unit, onOpenSession }: PrTableProps) {
   const [showEmpty, setShowEmpty] = useState(false);
   const byReps = new Map<number, PrEntry>();
   let highReps: PrEntry | null = null;
@@ -72,7 +75,11 @@ export function PrTable({ prs, onOpenSession }: PrTableProps) {
               {rows.map((row) => (
                 <tr key={row.reps}>
                   <th scope="row">{row.reps}</th>
-                  <td>{row.entry ? `${row.entry.weight} kg` : '—'}</td>
+                  <td>
+                    {row.entry
+                      ? `${formatWeight(row.entry.weight, unit)} ${unit}`
+                      : '—'}
+                  </td>
                   <td>{row.entry ? formatDate(row.entry.date) : '—'}</td>
                   <td>
                     {row.entry && onOpenSession ? (

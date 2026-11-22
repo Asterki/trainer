@@ -1,12 +1,12 @@
 {
-  "name": "tasker-sync-relay",
+  "name": "trainer-relay",
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Minimal append-only sync relay for Tasker, with an optional MCP endpoint.",
+  "description": "Encrypted sync relay and training-context API for Trainer.",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && mkdir -p dist/trainer/catalogue && cp src/trainer/catalogue/wger-exercises.json dist/trainer/catalogue/ && cp openapi.json dist/openapi.json",
     "start": "node dist/index.js",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

@@ -6,7 +6,13 @@
  * to IndexedDB; only custom exercises live in the database.
  */
 
-import type { EquipmentId, Exercise, ExerciseCategory, MuscleGroupId } from '../types';
+import type {
+  EquipmentId,
+  Exercise,
+  ExerciseCategory,
+  ExerciseMedia,
+  MuscleGroupId,
+} from '../types';
 
 interface CatalogueRow {
   wgerId: number;
@@ -16,6 +22,7 @@ interface CatalogueRow {
   secondary: MuscleGroupId[];
   equipment: EquipmentId[];
   instructions: string;
+  media?: ExerciseMedia[];
 }
 
 export interface ExerciseSearchQuery {
@@ -56,6 +63,7 @@ function fromRow(row: CatalogueRow): Exercise {
     secondaryMuscles: row.secondary,
     equipment: row.equipment,
     instructions: row.instructions,
+    media: row.media,
     source: 'wger',
     createdAt: null,
   };

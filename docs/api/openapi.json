@@ -68,7 +68,7 @@
                       "status": "completed",
                       "exercises": [
                         {
-                          "exerciseId": "wger:192",
+                          "exerciseId": "wger:73",
                           "name": "Bench Press",
                           "primaryMuscles": ["pectoralis-major"],
                           "sets": [
@@ -83,7 +83,7 @@
                   ],
                   "exerciseStats": [
                     {
-                      "exerciseId": "wger:192",
+                      "exerciseId": "wger:73",
                       "name": "Bench Press",
                       "primaryMuscles": ["pectoralis-major"],
                       "last": {
@@ -222,7 +222,7 @@
                 "example": {
                   "exercises": [
                     {
-                      "id": "wger:192",
+                      "id": "wger:73",
                       "name": "Bench Press",
                       "category": "chest",
                       "primaryMuscles": ["pectoralis-major"],
@@ -419,7 +419,7 @@
                 "notes": "Week 1 push, slightly reduced pressing volume.",
                 "exercises": [
                   {
-                    "exerciseId": "wger:192",
+                    "exerciseId": "wger:73",
                     "targetSets": 4,
                     "targetRepMin": 6,
                     "targetRepMax": 8,
@@ -455,7 +455,7 @@
                   "exercises": [
                     {
                       "id": "2c7e6a1b-4f3d-4b9a-8e2c-1d5f7a9b0c3e",
-                      "exerciseId": "wger:192",
+                      "exerciseId": "wger:73",
                       "name": "Bench Press",
                       "primaryMuscles": ["pectoralis-major"],
                       "secondaryMuscles": ["triceps-brachii", "anterior-deltoid"],
@@ -809,6 +809,7 @@
             "items": { "$ref": "#/components/schemas/SessionExercise" }
           },
           "notes": { "type": "string", "maxLength": 2000 },
+          "rating": { "type": ["integer", "null"], "minimum": 1, "maximum": 5 },
           "createdAt": { "$ref": "#/components/schemas/IsoDateTime" },
           "updatedAt": { "$ref": "#/components/schemas/IsoDateTime" },
           "completedAt": { "type": ["string", "null"], "format": "date-time" },

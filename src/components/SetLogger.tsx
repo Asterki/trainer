@@ -1,6 +1,11 @@
 import { useEffect, useRef, useState, type FocusEvent } from 'react';
 import { FiCheck, FiPlus, FiTrash2 } from 'react-icons/fi';
-import type { SessionExercise, SetLog, Settings } from '../domain/types';
+import type { SessionExercise, SetLog, Settings, WeightUnit } from '../domain/types';
+import {
+  displayMaxWeight,
+  formatWeightInput,
+  weightToKg,
+} from '../domain/units';
 import { useTrainer } from '../state/store';
 
 let audioContext: AudioContext | null = null;
@@ -33,6 +38,7 @@ function playFeedback(settings: Settings) {
 interface SetRowProps {
   set: SetLog;
   index: number;
+  unit: WeightUnit;
   draft?: boolean;
   disabled: boolean;
   onPersist: (value: { weight: number; reps: number }) => Promise<void>;
@@ -44,6 +50,7 @@ interface SetRowProps {
 function SetRow({
   set,
   index,
+  unit,
   draft = false,
   disabled,
   onPersist,
@@ -51,7 +58,7 @@ function SetRow({
   onEnter,
   onSavingChange,
 }: SetRowProps) {
-  const [weight, setWeight] = useState(String(set.weight));
+  const [weight, setWeight] = useState(formatWeightInput(set.weight, unit));
   const [reps, setReps] = useState(String(set.reps));
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -61,11 +68,12 @@ function SetRow({
 
   useEffect(() => {
     if (draft) return;
-    setWeight(String(set.weight));
+    const nextWeight = formatWeightInput(set.weight, unit);
+    setWeight(nextWeight);
     setReps(String(set.reps));
-    weightRef.current = String(set.weight);
+    weightRef.current = nextWeight;
     repsRef.current = String(set.reps);
-  }, [draft, set.reps, set.weight]);
+  }, [draft, set.reps, set.weight, unit]);
 
   useEffect(
     () => () => {
@@ -85,11 +93,11 @@ function SetRow({
       return false;
     }
     const parsedWeight = weightRef.current.trim() === '' ? 0 : Number(weightRef.current);
-    if (!Number.isFinite(parsedWeight) || parsedWeight < 0 || parsedWeight > 1000) {
-      setError('Weight must be between 0 and 1,000 kg.');
+    if (!Number.isFinite(parsedWeight) || parsedWeight < 0 || parsedWeight > displayMaxWeight(unit)) {
+      setError(`Weight must be between 0 and ${displayMaxWeight(unit).toLocaleString()} ${unit}.`);
       return false;
     }
-    const nextWeight = Math.round(parsedWeight * 100) / 100;
+    const nextWeight = Math.round(weightToKg(parsedWeight, unit) * 100) / 100;
     setError(null);
 
     if (!draft && nextWeight === set.weight && nextReps === set.reps) return true;
@@ -149,22 +157,22 @@ function SetRow({
         {index}
       </span>
       <label className="set-row__field">
-        <span className="visually-hidden">Weight in kilograms</span>
+        <span className="visually-hidden">Weight in {unit === 'kg' ? 'kilograms' : 'pounds'}</span>
         <input
           className="input input--num set-row__input"
           type="number"
           inputMode="decimal"
           min={0}
-          max={1000}
-          step={0.5}
+          max={displayMaxWeight(unit)}
+          step={unit === 'lb' ? 1 : 0.5}
           value={weight}
           disabled={disabled}
           data-field="weight"
-          aria-label={`Set ${index} weight in kilograms`}
+          aria-label={`Set ${index} weight in ${unit === 'kg' ? 'kilograms' : 'pounds'}`}
           onChange={(event) => changeWeight(event.target.value)}
           onBlur={handleBlur}
         />
-        <span className="set-row__suffix">kg</span>
+        <span className="set-row__suffix">{unit}</span>
       </label>
       <label className="set-row__field">
         <span className="visually-hidden">Repetitions</span>
@@ -256,14 +264,42 @@ export function SetLogger({
       ?.focus();
   }, [draft]);
 
-  function addSet(focus = false) {
-    const previous = draft ?? row.sets[row.sets.length - 1];
-    focusDraft.current = focus;
-    setDraft({
+  async function addSet(focus = false) {
+    if (draft) {
+      containerRef.current
+        ?.querySelector<HTMLInputElement>('[data-draft="true"] [data-field="weight"]')
+        ?.focus();
+      return;
+    }
+
+    const previous = row.sets[row.sets.length - 1];
+    if (!previous) {
+      focusDraft.current = true;
+      setDraft({
+        id: crypto.randomUUID(),
+        weight: 0,
+        reps: row.targetRepMin,
+      });
+      return;
+    }
+
+    const set = {
       id: crypto.randomUUID(),
-      weight: previous?.weight ?? 0,
-      reps: previous?.reps ?? row.targetRepMin,
-    });
+      weight: previous.weight,
+      reps: previous.reps,
+    };
+    setDraft(null);
+    try {
+      await onLogSet(set);
+      playFeedback(settings);
+      if (focus) {
+        const rows = containerRef.current?.querySelectorAll('[data-set-row]');
+        const last = rows?.[rows.length - 1] as HTMLElement | undefined;
+        last?.querySelector<HTMLInputElement>('[data-field="weight"]')?.focus();
+      }
+    } catch {
+      // The store surfaces write failures; keep the logger usable.
+    }
   }
 
   async function persistDraft(value: { weight: number; reps: number }) {
@@ -286,6 +322,7 @@ export function SetLogger({
           key={set.id}
           set={set}
           index={index + 1}
+          unit={settings.weightUnit}
           disabled={!editable}
           onPersist={(patch) => onUpdateSet(set.id, patch)}
           onRemove={() => onRemoveSet(set.id)}
@@ -307,6 +344,7 @@ export function SetLogger({
           key={draft.id}
           set={{ id: draft.id, weight: draft.weight, reps: draft.reps }}
           index={row.sets.length + 1}
+          unit={settings.weightUnit}
           draft
           disabled={!editable}
           onPersist={persistDraft}
@@ -316,7 +354,7 @@ export function SetLogger({
         />
       ) : null}
       {editable ? (
-        <button type="button" className="set-logger__add" onClick={() => addSet()}>
+        <button type="button" className="set-logger__add" onClick={() => void addSet()}>
           <FiPlus aria-hidden="true" />
           Add set
         </button>

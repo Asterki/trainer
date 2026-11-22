@@ -48,6 +48,9 @@ export const DEFAULT_SETTINGS: Settings = {
   soundEnabled: false,
   hapticsEnabled: true,
   timezone: deviceTimezone(),
+  weightUnit: 'kg',
+  heightCm: null,
+  bodyWeightKg: null,
 };
 
 function record(value: unknown): Record<string, unknown> {
@@ -290,6 +293,7 @@ export function normalizeSession(value: unknown): Session {
     source: sessionSource,
     exercises: normalizeSessionExercises(source.exercises),
     notes: text(source.notes, '', 2000),
+    rating: integer(source.rating, 0, 0, 5) || null,
     createdAt,
     updatedAt: timestamp(source.updatedAt ?? createdAt),
     completedAt: optionalTimestamp(source.completedAt),
@@ -310,6 +314,11 @@ export function normalizeSessions(value: unknown): Session[] {
   return [...byDate.values()];
 }
 
+function nullableNumber(value: unknown, min: number, max: number): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+  return Math.min(max, Math.max(min, Math.round(value * 10) / 10));
+}
+
 export function normalizeSettings(value: unknown): Settings {
   const source = record(value);
   return {
@@ -320,6 +329,9 @@ export function normalizeSettings(value: unknown): Settings {
       typeof source.timezone === 'string' && isValidTimezone(source.timezone)
         ? source.timezone
         : deviceTimezone(),
+    weightUnit: source.weightUnit === 'lb' ? 'lb' : 'kg',
+    heightCm: nullableNumber(source.heightCm, 50, 250),
+    bodyWeightKg: nullableNumber(source.bodyWeightKg, 20, 500),
   };
 }
 

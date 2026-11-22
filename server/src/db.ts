@@ -13,6 +13,7 @@ import { dirname, resolve } from 'node:path';
 
 const databasePath = process.env.DB_PATH
   ? resolve(process.env.DB_PATH)
+  // Frozen legacy name: changing it would open an empty database beside existing data.
   : resolve(process.cwd(), 'data', 'tasker.db');
 
 mkdirSync(dirname(databasePath), { recursive: true });
@@ -98,7 +99,7 @@ export interface StoredEntity {
   payload: string;
 }
 
-export const ENTITY_TYPES = ['task', 'category', 'project', 'place', 'settings'] as const;
+export const ENTITY_TYPES = ['routine', 'session', 'exercise', 'settings'] as const;
 export type EntityType = (typeof ENTITY_TYPES)[number];
 
 const insertUser = db.prepare(

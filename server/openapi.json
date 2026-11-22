@@ -1,0 +1,1170 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Trainer Relay API",
+    "version": "1.0.0",
+    "summary": "Authenticated read and write contract between the Trainer relay and n8n.",
+    "description": "Base path `/api/v1`. Authenticate with `Authorization: Bearer <sync passphrase>`. The relay stores encrypted entities and decrypts them in memory only while serving a request. This document is the n8n contract; the app itself does not poll the API.",
+    "license": {
+      "name": "Private use",
+      "identifier": "LicenseRef-Proprietary"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://trainer-relay.invalid",
+      "description": "Replace with your self-hosted Trainer relay origin. TLS is mandatory."
+    }
+  ],
+  "tags": [
+    { "name": "Context", "description": "Compact report for the morning AI workflow." },
+    { "name": "Catalogue", "description": "Read-only exercise catalogue search." },
+    { "name": "Routines", "description": "Routine read access." },
+    { "name": "Sessions", "description": "Session read access and today's plan write." },
+    { "name": "Metrics", "description": "Derived PRs and weekly muscle volume." },
+    { "name": "Meta", "description": "Public service metadata." }
+  ],
+  "security": [
+    { "BearerAuth": [] }
+  ],
+  "paths": {
+    "/api/v1/context": {
+      "get": {
+        "tags": ["Context"],
+        "operationId": "getContext",
+        "summary": "Get the compact training report",
+        "description": "Returns the context report used by n8n. The date defaults to today in the relay timezone. Routine is null when no routine is active. Arrays are capped server-side.",
+        "parameters": [
+          {
+            "name": "date",
+            "in": "query",
+            "required": false,
+            "description": "Calendar date to report on. Defaults to today in TRAINER_TIMEZONE.",
+            "schema": { "$ref": "#/components/schemas/IsoDate" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Compact context report.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ContextReport" },
+                "example": {
+                  "version": 1,
+                  "date": "2026-11-16",
+                  "generatedAt": "2026-11-16T06:00:00+00:00",
+                  "routine": {
+                    "id": "6d1c2f6e-6f6a-4c3e-9f0a-6d1c2f6e6f6a",
+                    "name": "PPL 2-week",
+                    "weekIndex": 0,
+                    "weekday": 1,
+                    "focus": "Push",
+                    "isRest": false
+                  },
+                  "recentSessions": [
+                    {
+                      "date": "2026-11-09",
+                      "focus": "Push",
+                      "status": "completed",
+                      "exercises": [
+                        {
+                          "exerciseId": "wger:73",
+                          "name": "Bench Press",
+                          "primaryMuscles": ["pectoralis-major"],
+                          "sets": [
+                            { "weight": 80, "reps": 8 },
+                            { "weight": 80, "reps": 7 }
+                          ],
+                          "topWeight": 80,
+                          "volume": 1200
+                        }
+                      ]
+                    }
+                  ],
+                  "exerciseStats": [
+                    {
+                      "exerciseId": "wger:73",
+                      "name": "Bench Press",
+                      "primaryMuscles": ["pectoralis-major"],
+                      "last": {
+                        "date": "2026-11-09",
+                        "sets": [{ "weight": 80, "reps": 8 }]
+                      },
+                      "prs": { "5": 95, "8": 80 },
+                      "volumeTrend": [1200, 1350, 1280]
+                    }
+                  ],
+                  "candidates": [
+                    {
+                      "exerciseId": "wger:145",
+                      "name": "Incline Dumbbell Press",
+                      "primaryMuscles": ["pectoralis-major"],
+                      "secondaryMuscles": ["triceps-brachii", "anterior-deltoid"],
+                      "equipment": ["dumbbell"]
+                    }
+                  ],
+                  "muscleVolume": [
+                    {
+                      "week": "2026-W45",
+                      "muscles": {
+                        "pectoralis-major": 8200,
+                        "triceps-brachii": 4100
+                      }
+                    }
+                  ],
+                  "adherence": {
+                    "weeks": 8,
+                    "scheduled": 16,
+                    "completed": 12,
+                    "skipped": 4,
+                    "rate": 0.75
+                  }
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "429": { "$ref": "#/components/responses/TooManyRequests" },
+          "500": { "$ref": "#/components/responses/InternalError" }
+        }
+      }
+    },
+    "/api/v1/routines": {
+      "get": {
+        "tags": ["Routines"],
+        "operationId": "listRoutines",
+        "summary": "List routines",
+        "description": "Returns every routine, active first, then most recently updated.",
+        "responses": {
+          "200": {
+            "description": "All routines.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["routines"],
+                  "properties": {
+                    "routines": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/Routine" }
+                    }
+                  }
+                },
+                "example": { "routines": [] }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "429": { "$ref": "#/components/responses/TooManyRequests" },
+          "500": { "$ref": "#/components/responses/InternalError" }
+        }
+      }
+    },
+    "/api/v1/exercises": {
+      "get": {
+        "tags": ["Catalogue"],
+        "operationId": "searchExercises",
+        "summary": "Search the exercise catalogue",
+        "description": "Searches seeded and custom exercises with the same normalization and ranking as the app. Returns compact rows, never instructions or images.",
+        "parameters": [
+          {
+            "name": "query",
+            "in": "query",
+            "required": false,
+            "description": "Normalized name or alias search.",
+            "schema": { "type": "string", "maxLength": 100 }
+          },
+          {
+            "name": "muscle",
+            "in": "query",
+            "required": false,
+            "description": "Match a primary or secondary muscle.",
+            "schema": { "$ref": "#/components/schemas/MuscleGroupId" }
+          },
+          {
+            "name": "equipment",
+            "in": "query",
+            "required": false,
+            "schema": { "$ref": "#/components/schemas/EquipmentId" }
+          },
+          {
+            "name": "category",
+            "in": "query",
+            "required": false,
+            "schema": { "$ref": "#/components/schemas/ExerciseCategory" }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer", "minimum": 1, "maximum": 100, "default": 50 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Compact catalogue rows.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["exercises"],
+                  "properties": {
+                    "exercises": {
+                      "type": "array",
+                      "maxItems": 100,
+                      "items": { "$ref": "#/components/schemas/CompactExercise" }
+                    }
+                  }
+                },
+                "example": {
+                  "exercises": [
+                    {
+                      "id": "wger:73",
+                      "name": "Bench Press",
+                      "category": "chest",
+                      "primaryMuscles": ["pectoralis-major"],
+                      "secondaryMuscles": ["triceps-brachii", "anterior-deltoid"],
+                      "equipment": ["barbell"],
+                      "source": "wger"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "429": { "$ref": "#/components/responses/TooManyRequests" },
+          "500": { "$ref": "#/components/responses/InternalError" }
+        }
+      }
+    },
+    "/api/v1/sessions": {
+      "get": {
+        "tags": ["Sessions"],
+        "operationId": "listSessions",
+        "summary": "List sessions in a date range",
+        "description": "Returns full sessions including logged sets. Defaults to the last 30 days in the relay timezone. Limit is capped at 200.",
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "schema": { "$ref": "#/components/schemas/IsoDate" }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "schema": { "$ref": "#/components/schemas/IsoDate" }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": { "$ref": "#/components/schemas/SessionStatus" }
+          },
+          {
+            "name": "focus",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string", "maxLength": 40 }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer", "minimum": 1, "maximum": 200, "default": 50 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sessions in ascending date order.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["sessions"],
+                  "properties": {
+                    "sessions": {
+                      "type": "array",
+                      "maxItems": 200,
+                      "items": { "$ref": "#/components/schemas/Session" }
+                    }
+                  }
+                },
+                "example": { "sessions": [] }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "429": { "$ref": "#/components/responses/TooManyRequests" },
+          "500": { "$ref": "#/components/responses/InternalError" }
+        }
+      }
+    },
+    "/api/v1/prs": {
+      "get": {
+        "tags": ["Metrics"],
+        "operationId": "listPrs",
+        "summary": "List derived PRs",
+        "description": "PR is the heaviest weight for a given rep count, earliest date on a tie. Bodyweight sets are excluded. An unknown exercise id returns an empty list.",
+        "parameters": [
+          {
+            "name": "exerciseId",
+            "in": "query",
+            "required": false,
+            "description": "Restrict to one exercise. Omit for all exercises.",
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Derived PR entries.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["prs"],
+                  "properties": {
+                    "prs": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/PrEntry" }
+                    }
+                  }
+                },
+                "example": { "prs": [] }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "429": { "$ref": "#/components/responses/TooManyRequests" },
+          "500": { "$ref": "#/components/responses/InternalError" }
+        }
+      }
+    },
+    "/api/v1/muscles/volume": {
+      "get": {
+        "tags": ["Metrics"],
+        "operationId": "listMuscleVolume",
+        "summary": "Weekly volume per muscle group",
+        "description": "Aggregates completed sessions by ISO week using the documented primary-full, secondary-half rule. Weeks with no training are included with zeros.",
+        "parameters": [
+          {
+            "name": "weeks",
+            "in": "query",
+            "required": false,
+            "description": "Number of ISO weeks to return.",
+            "schema": { "type": "integer", "minimum": 1, "maximum": 52, "default": 12 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Weekly muscle volume, oldest first.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["weeks"],
+                  "properties": {
+                    "weeks": {
+                      "type": "array",
+                      "maxItems": 52,
+                      "items": { "$ref": "#/components/schemas/MuscleWeek" }
+                    }
+                  }
+                },
+                "example": { "weeks": [] }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "429": { "$ref": "#/components/responses/TooManyRequests" },
+          "500": { "$ref": "#/components/responses/InternalError" }
+        }
+      }
+    },
+    "/api/v1/sessions/{date}": {
+      "put": {
+        "tags": ["Sessions"],
+        "operationId": "putSessionPlan",
+        "summary": "Create or replace today's planned session",
+        "description": "Writes an AI plan for today (plus a ±1 day timezone grace). The day must be a scheduled workout of the active routine. Writes are rejected with 409 when the session is closed, is an ad-hoc manual session, or already has a logged set. Exercise ids win; otherwise an exact unique normalized name is required.",
+        "parameters": [
+          {
+            "name": "date",
+            "in": "path",
+            "required": true,
+            "description": "Today's local date in the relay timezone, with a ±1 day grace.",
+            "schema": { "$ref": "#/components/schemas/IsoDate" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/SessionPlanRequest" },
+              "example": {
+                "source": "ai",
+                "focus": "Push",
+                "notes": "Week 1 push, slightly reduced pressing volume.",
+                "exercises": [
+                  {
+                    "exerciseId": "wger:73",
+                    "targetSets": 4,
+                    "targetRepMin": 6,
+                    "targetRepMax": 8,
+                    "note": "Leave one rep in reserve."
+                  },
+                  {
+                    "name": "Incline Dumbbell Press",
+                    "targetSets": 3,
+                    "targetRepMin": 8,
+                    "targetRepMax": 12
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The stored session after the write.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Session" },
+                "example": {
+                  "id": "8f2b1d4a-6f2e-4a8b-9d7c-3a1e5b6c7d8e",
+                  "date": "2026-11-16",
+                  "routineId": "6d1c2f6e-6f6a-4c3e-9f0a-6d1c2f6e6f6a",
+                  "routineName": "PPL 2-week",
+                  "weekIndex": 0,
+                  "weekday": 1,
+                  "focus": "Push",
+                  "status": "planned",
+                  "source": "ai",
+                  "exercises": [
+                    {
+                      "id": "2c7e6a1b-4f3d-4b9a-8e2c-1d5f7a9b0c3e",
+                      "exerciseId": "wger:73",
+                      "name": "Bench Press",
+                      "primaryMuscles": ["pectoralis-major"],
+                      "secondaryMuscles": ["triceps-brachii", "anterior-deltoid"],
+                      "order": 0,
+                      "targetSets": 4,
+                      "targetRepMin": 6,
+                      "targetRepMax": 8,
+                      "note": "Leave one rep in reserve.",
+                      "sets": []
+                    }
+                  ],
+                  "notes": "Week 1 push, slightly reduced pressing volume.",
+                  "createdAt": "2026-11-16T06:00:01+00:00",
+                  "updatedAt": "2026-11-16T06:00:01+00:00",
+                  "completedAt": null,
+                  "skippedAt": null
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "422": { "$ref": "#/components/responses/UnprocessableEntity" },
+          "429": { "$ref": "#/components/responses/TooManyRequests" },
+          "500": { "$ref": "#/components/responses/InternalError" }
+        }
+      }
+    },
+    "/api/v1/openapi.json": {
+      "get": {
+        "tags": ["Meta"],
+        "operationId": "getOpenApi",
+        "summary": "Get this OpenAPI document",
+        "description": "Public, unauthenticated copy of the contract served by the relay. Cached for 5 minutes.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OpenAPI 3.1 JSON document.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "429": { "$ref": "#/components/responses/TooManyRequests" },
+          "500": { "$ref": "#/components/responses/InternalError" }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "The relay sync passphrase, sent as `Authorization: Bearer <passphrase>`. It grants full read/write access to the space. Use a long random value; TLS is mandatory."
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "Malformed body, invalid date, or an invalid query value.",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/Error" }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "Missing, malformed or unknown bearer credential.",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/Error" }
+          }
+        }
+      },
+      "Conflict": {
+        "description": "The requested write conflicts with the current session or schedule state.",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/Error" }
+          }
+        }
+      },
+      "UnprocessableEntity": {
+        "description": "A referenced exercise is unknown or its name cannot be resolved.",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/Error" }
+          }
+        }
+      },
+      "TooManyRequests": {
+        "description": "Rate limit exceeded.",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/Error" }
+          }
+        }
+      },
+      "InternalError": {
+        "description": "Internal error. No stack trace is returned.",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/Error" }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "IsoDate": {
+        "type": "string",
+        "format": "date",
+        "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+        "description": "Local calendar date, never a UTC timestamp."
+      },
+      "IsoDateTime": {
+        "type": "string",
+        "format": "date-time",
+        "description": "ISO 8601 timestamp with offset."
+      },
+      "Weekday": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 7,
+        "description": "ISO weekday: 1 Monday through 7 Sunday."
+      },
+      "MuscleGroupId": {
+        "type": "string",
+        "enum": [
+          "anterior-deltoid",
+          "posterior-deltoid",
+          "biceps-brachii",
+          "brachialis",
+          "triceps-brachii",
+          "pectoralis-major",
+          "latissimus-dorsi",
+          "rhomboid",
+          "trapezius",
+          "serratus-anterior",
+          "erector-spinae",
+          "rectus-abdominis",
+          "obliquus-externus-abdominis",
+          "gluteus-maximus",
+          "quadriceps-femoris",
+          "hamstrings",
+          "gastrocnemius",
+          "soleus"
+        ]
+      },
+      "EquipmentId": {
+        "type": "string",
+        "enum": [
+          "barbell",
+          "dumbbell",
+          "machine",
+          "cable",
+          "bodyweight",
+          "kettlebell",
+          "band",
+          "other"
+        ]
+      },
+      "ExerciseCategory": {
+        "type": "string",
+        "enum": ["chest", "back", "shoulders", "arms", "legs", "calves", "abs", "full-body"]
+      },
+      "SessionStatus": {
+        "type": "string",
+        "enum": ["planned", "completed", "skipped"]
+      },
+      "SessionSource": {
+        "type": "string",
+        "enum": ["ai", "manual", "auto"]
+      },
+      "CompactExercise": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "name",
+          "category",
+          "primaryMuscles",
+          "secondaryMuscles",
+          "equipment",
+          "source"
+        ],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "name": { "type": "string", "minLength": 1 },
+          "category": { "$ref": "#/components/schemas/ExerciseCategory" },
+          "primaryMuscles": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "$ref": "#/components/schemas/MuscleGroupId" }
+          },
+          "secondaryMuscles": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/MuscleGroupId" }
+          },
+          "equipment": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/EquipmentId" }
+          },
+          "source": { "type": "string", "enum": ["wger", "custom"] }
+        }
+      },
+      "RoutineSlot": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["weekIndex", "weekday", "kind", "focus", "note"],
+        "properties": {
+          "weekIndex": { "type": "integer", "minimum": 0, "maximum": 11 },
+          "weekday": { "$ref": "#/components/schemas/Weekday" },
+          "kind": { "type": "string", "enum": ["workout", "rest"] },
+          "focus": {
+            "type": "string",
+            "maxLength": 40,
+            "description": "Empty on rest slots."
+          },
+          "note": { "type": "string", "maxLength": 200 }
+        }
+      },
+      "Routine": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "name",
+          "notes",
+          "startDate",
+          "weekCount",
+          "slots",
+          "active",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "name": { "type": "string", "minLength": 2, "maxLength": 60 },
+          "notes": { "type": "string" },
+          "startDate": { "$ref": "#/components/schemas/IsoDate" },
+          "weekCount": { "type": "integer", "minimum": 1, "maximum": 12 },
+          "slots": {
+            "type": "array",
+            "minItems": 7,
+            "maxItems": 84,
+            "items": { "$ref": "#/components/schemas/RoutineSlot" }
+          },
+          "active": { "type": "boolean" },
+          "createdAt": { "$ref": "#/components/schemas/IsoDateTime" },
+          "updatedAt": { "$ref": "#/components/schemas/IsoDateTime" }
+        }
+      },
+      "SetLog": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "weight", "reps"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "weight": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1000,
+            "description": "Kilograms, at most 2 decimals. 0 means bodyweight."
+          },
+          "reps": { "type": "integer", "minimum": 1, "maximum": 999 }
+        }
+      },
+      "SessionExercise": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "exerciseId",
+          "name",
+          "primaryMuscles",
+          "secondaryMuscles",
+          "order",
+          "targetSets",
+          "targetRepMin",
+          "targetRepMax",
+          "note",
+          "sets"
+        ],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "exerciseId": { "type": "string", "minLength": 1 },
+          "name": { "type": "string", "minLength": 1 },
+          "primaryMuscles": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "$ref": "#/components/schemas/MuscleGroupId" }
+          },
+          "secondaryMuscles": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/MuscleGroupId" }
+          },
+          "order": { "type": "integer", "minimum": 0 },
+          "targetSets": { "type": "integer", "minimum": 1, "maximum": 12 },
+          "targetRepMin": { "type": "integer", "minimum": 1, "maximum": 50 },
+          "targetRepMax": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "description": "Must be greater than or equal to targetRepMin."
+          },
+          "note": { "type": "string", "maxLength": 500 },
+          "sets": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/SetLog" }
+          }
+        }
+      },
+      "Session": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "date",
+          "routineId",
+          "routineName",
+          "weekIndex",
+          "weekday",
+          "focus",
+          "status",
+          "source",
+          "exercises",
+          "notes",
+          "createdAt",
+          "updatedAt",
+          "completedAt",
+          "skippedAt"
+        ],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "date": { "$ref": "#/components/schemas/IsoDate" },
+          "routineId": { "type": ["string", "null"] },
+          "routineName": { "type": "string" },
+          "weekIndex": { "type": ["integer", "null"], "minimum": 0, "maximum": 11 },
+          "weekday": { "$ref": "#/components/schemas/Weekday" },
+          "focus": { "type": "string", "maxLength": 40 },
+          "status": { "$ref": "#/components/schemas/SessionStatus" },
+          "source": { "$ref": "#/components/schemas/SessionSource" },
+          "exercises": {
+            "type": "array",
+            "maxItems": 30,
+            "items": { "$ref": "#/components/schemas/SessionExercise" }
+          },
+          "notes": { "type": "string", "maxLength": 2000 },
+          "rating": { "type": ["integer", "null"], "minimum": 1, "maximum": 5 },
+          "createdAt": { "$ref": "#/components/schemas/IsoDateTime" },
+          "updatedAt": { "$ref": "#/components/schemas/IsoDateTime" },
+          "completedAt": { "type": ["string", "null"], "format": "date-time" },
+          "skippedAt": { "type": ["string", "null"], "format": "date-time" }
+        }
+      },
+      "PrEntry": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["exerciseId", "name", "reps", "weight", "date", "sessionId"],
+        "properties": {
+          "exerciseId": { "type": "string", "minLength": 1 },
+          "name": { "type": "string", "minLength": 1 },
+          "reps": { "type": "integer", "minimum": 1, "maximum": 999 },
+          "weight": { "type": "number", "exclusiveMinimum": 0 },
+          "date": { "$ref": "#/components/schemas/IsoDate" },
+          "sessionId": { "type": "string", "minLength": 1 }
+        }
+      },
+      "MuscleVolumeMap": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Kilograms per muscle. Omitted muscles are zero.",
+        "properties": {
+          "anterior-deltoid": { "type": "number", "minimum": 0 },
+          "posterior-deltoid": { "type": "number", "minimum": 0 },
+          "biceps-brachii": { "type": "number", "minimum": 0 },
+          "brachialis": { "type": "number", "minimum": 0 },
+          "triceps-brachii": { "type": "number", "minimum": 0 },
+          "pectoralis-major": { "type": "number", "minimum": 0 },
+          "latissimus-dorsi": { "type": "number", "minimum": 0 },
+          "rhomboid": { "type": "number", "minimum": 0 },
+          "trapezius": { "type": "number", "minimum": 0 },
+          "serratus-anterior": { "type": "number", "minimum": 0 },
+          "erector-spinae": { "type": "number", "minimum": 0 },
+          "rectus-abdominis": { "type": "number", "minimum": 0 },
+          "obliquus-externus-abdominis": { "type": "number", "minimum": 0 },
+          "gluteus-maximus": { "type": "number", "minimum": 0 },
+          "quadriceps-femoris": { "type": "number", "minimum": 0 },
+          "hamstrings": { "type": "number", "minimum": 0 },
+          "gastrocnemius": { "type": "number", "minimum": 0 },
+          "soleus": { "type": "number", "minimum": 0 }
+        }
+      },
+      "WeightedSetMap": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Weighted set counts per muscle, primary 1 and secondary 0.5, rounded to one decimal.",
+        "properties": {
+          "anterior-deltoid": { "type": "number", "minimum": 0 },
+          "posterior-deltoid": { "type": "number", "minimum": 0 },
+          "biceps-brachii": { "type": "number", "minimum": 0 },
+          "brachialis": { "type": "number", "minimum": 0 },
+          "triceps-brachii": { "type": "number", "minimum": 0 },
+          "pectoralis-major": { "type": "number", "minimum": 0 },
+          "latissimus-dorsi": { "type": "number", "minimum": 0 },
+          "rhomboid": { "type": "number", "minimum": 0 },
+          "trapezius": { "type": "number", "minimum": 0 },
+          "serratus-anterior": { "type": "number", "minimum": 0 },
+          "erector-spinae": { "type": "number", "minimum": 0 },
+          "rectus-abdominis": { "type": "number", "minimum": 0 },
+          "obliquus-externus-abdominis": { "type": "number", "minimum": 0 },
+          "gluteus-maximus": { "type": "number", "minimum": 0 },
+          "quadriceps-femoris": { "type": "number", "minimum": 0 },
+          "hamstrings": { "type": "number", "minimum": 0 },
+          "gastrocnemius": { "type": "number", "minimum": 0 },
+          "soleus": { "type": "number", "minimum": 0 }
+        }
+      },
+      "MuscleWeek": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["week", "muscles", "sets"],
+        "properties": {
+          "week": {
+            "type": "string",
+            "pattern": "^\\d{4}-W(0[1-9]|[1-4][0-9]|5[0-3])$"
+          },
+          "muscles": { "$ref": "#/components/schemas/MuscleVolumeMap" },
+          "sets": { "$ref": "#/components/schemas/WeightedSetMap" }
+        }
+      },
+      "ContextRoutine": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "name", "weekIndex", "weekday", "focus", "isRest"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "name": { "type": "string", "minLength": 1 },
+          "weekIndex": { "type": "integer", "minimum": 0, "maximum": 11 },
+          "weekday": { "$ref": "#/components/schemas/Weekday" },
+          "focus": { "type": "string", "maxLength": 40 },
+          "isRest": { "type": "boolean" }
+        }
+      },
+      "ContextSet": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["weight", "reps"],
+        "properties": {
+          "weight": { "type": "number", "minimum": 0, "maximum": 1000 },
+          "reps": { "type": "integer", "minimum": 1, "maximum": 999 }
+        }
+      },
+      "RecentExercise": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["exerciseId", "name", "primaryMuscles", "sets", "topWeight", "volume"],
+        "properties": {
+          "exerciseId": { "type": "string", "minLength": 1 },
+          "name": { "type": "string", "minLength": 1 },
+          "primaryMuscles": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "$ref": "#/components/schemas/MuscleGroupId" }
+          },
+          "sets": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/ContextSet" }
+          },
+          "topWeight": { "type": "number", "minimum": 0 },
+          "volume": { "type": "number", "minimum": 0 }
+        }
+      },
+      "RecentSession": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["date", "focus", "status", "exercises"],
+        "properties": {
+          "date": { "$ref": "#/components/schemas/IsoDate" },
+          "focus": { "type": "string", "maxLength": 40 },
+          "status": { "type": "string", "enum": ["completed", "skipped"] },
+          "exercises": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/RecentExercise" }
+          }
+        }
+      },
+      "LastPerformance": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["date", "sets"],
+        "properties": {
+          "date": { "$ref": "#/components/schemas/IsoDate" },
+          "sets": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/ContextSet" }
+          }
+        }
+      },
+      "PrMap": {
+        "type": "object",
+        "description": "PR weight in kilograms keyed by rep count as a string.",
+        "propertyNames": {
+          "pattern": "^(?:[1-9]|[1-9][0-9]|[1-9][0-9][0-9])$"
+        },
+        "additionalProperties": { "type": "number", "minimum": 0 }
+      },
+      "ExerciseStats": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["exerciseId", "name", "primaryMuscles", "last", "prs", "volumeTrend"],
+        "properties": {
+          "exerciseId": { "type": "string", "minLength": 1 },
+          "name": { "type": "string", "minLength": 1 },
+          "primaryMuscles": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "$ref": "#/components/schemas/MuscleGroupId" }
+          },
+          "last": {
+            "oneOf": [
+              { "type": "null" },
+              { "$ref": "#/components/schemas/LastPerformance" }
+            ]
+          },
+          "prs": { "$ref": "#/components/schemas/PrMap" },
+          "volumeTrend": {
+            "type": "array",
+            "maxItems": 3,
+            "items": { "type": "number", "minimum": 0 }
+          }
+        }
+      },
+      "CandidateExercise": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["exerciseId", "name", "primaryMuscles", "secondaryMuscles", "equipment"],
+        "properties": {
+          "exerciseId": { "type": "string", "minLength": 1 },
+          "name": { "type": "string", "minLength": 1 },
+          "primaryMuscles": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "$ref": "#/components/schemas/MuscleGroupId" }
+          },
+          "secondaryMuscles": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/MuscleGroupId" }
+          },
+          "equipment": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/EquipmentId" }
+          }
+        }
+      },
+      "ContextMuscleWeek": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["week", "muscles"],
+        "properties": {
+          "week": {
+            "type": "string",
+            "pattern": "^\\d{4}-W(0[1-9]|[1-4][0-9]|5[0-3])$"
+          },
+          "muscles": { "$ref": "#/components/schemas/MuscleVolumeMap" }
+        }
+      },
+      "Adherence": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["weeks", "scheduled", "completed", "skipped", "rate"],
+        "properties": {
+          "weeks": { "type": "integer", "minimum": 0, "maximum": 52 },
+          "scheduled": { "type": "integer", "minimum": 0 },
+          "completed": { "type": "integer", "minimum": 0 },
+          "skipped": { "type": "integer", "minimum": 0 },
+          "rate": {
+            "type": ["number", "null"],
+            "minimum": 0,
+            "maximum": 1,
+            "description": "completed / (completed + skipped), or null when no outcome exists."
+          }
+        }
+      },
+      "ContextReport": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "date",
+          "generatedAt",
+          "routine",
+          "recentSessions",
+          "exerciseStats",
+          "candidates",
+          "muscleVolume",
+          "adherence"
+        ],
+        "properties": {
+          "version": {
+            "type": "integer",
+            "const": 1,
+            "description": "Context payload version."
+          },
+          "date": { "$ref": "#/components/schemas/IsoDate" },
+          "generatedAt": { "$ref": "#/components/schemas/IsoDateTime" },
+          "routine": {
+            "oneOf": [
+              { "type": "null" },
+              { "$ref": "#/components/schemas/ContextRoutine" }
+            ]
+          },
+          "recentSessions": {
+            "type": "array",
+            "maxItems": 6,
+            "items": { "$ref": "#/components/schemas/RecentSession" }
+          },
+          "exerciseStats": {
+            "type": "array",
+            "maxItems": 20,
+            "items": { "$ref": "#/components/schemas/ExerciseStats" }
+          },
+          "candidates": {
+            "type": "array",
+            "maxItems": 40,
+            "items": { "$ref": "#/components/schemas/CandidateExercise" }
+          },
+          "muscleVolume": {
+            "type": "array",
+            "maxItems": 8,
+            "items": { "$ref": "#/components/schemas/ContextMuscleWeek" }
+          },
+          "adherence": { "$ref": "#/components/schemas/Adherence" }
+        }
+      },
+      "SessionPlanExercise": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["targetSets", "targetRepMin", "targetRepMax"],
+        "anyOf": [
+          { "required": ["exerciseId"] },
+          { "required": ["name"] }
+        ],
+        "properties": {
+          "exerciseId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Catalogue or custom exercise id. Wins when both id and name are present."
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80,
+            "description": "Resolved exactly and uniquely after normalization when exerciseId is absent."
+          },
+          "targetSets": { "type": "integer", "minimum": 1, "maximum": 12 },
+          "targetRepMin": { "type": "integer", "minimum": 1, "maximum": 50 },
+          "targetRepMax": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "description": "Must be greater than or equal to targetRepMin."
+          },
+          "note": { "type": "string", "maxLength": 500 }
+        }
+      },
+      "SessionPlanRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["exercises"],
+        "properties": {
+          "source": {
+            "type": "string",
+            "enum": ["ai"],
+            "default": "ai",
+            "description": "Present for readability; the relay stores AI writes as `ai`."
+          },
+          "focus": { "type": "string", "maxLength": 40 },
+          "notes": { "type": "string", "maxLength": 2000 },
+          "exercises": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 30,
+            "items": { "$ref": "#/components/schemas/SessionPlanExercise" }
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["error", "message"],
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "Stable machine code, e.g. unauthorized, session_closed, unknown_exercise."
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable explanation safe to show in logs."
+          },
+          "details": {
+            "description": "Optional structured context, such as candidate ids for an ambiguous name."
+          }
+        }
+      }
+    }
+  }
+}

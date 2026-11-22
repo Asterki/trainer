@@ -41,7 +41,15 @@ import {
   writeSessionNew,
 } from '../db/database';
 import { parseBackup } from '../domain/backup';
-import { isSessionEditable, planSessionBootstrap } from '../domain/session';
+import { loadSyncRuntime, registerApplyHandler } from '../sync/engine';
+import type { SyncConfig } from '../sync/types';
+import {
+  createSessionForSlot,
+  isSessionEditable,
+  isSessionPlanEditable,
+  planSessionBootstrap,
+} from '../domain/session';
+import { resolveSlot } from '../domain/routine';
 import type {
   BackupFile,
   CustomExerciseInput,
@@ -50,6 +58,7 @@ import type {
   Routine,
   RoutineInput,
   RoutinePatch,
+  IsoDate,
   Session,
   SessionExercise,
   SetLog,
@@ -74,9 +83,12 @@ interface TrainerActions {
   updateRoutine(id: string, patch: RoutinePatch): Promise<void>;
   deleteRoutine(id: string): Promise<void>;
   setActiveRoutine(id: string): Promise<void>;
+  setRoutineActive(id: string, active: boolean): Promise<void>;
   ensureSessions(): Promise<void>;
+  ensureSessionForDate(date: IsoDate): Promise<Session | null>;
   createAdHocSession(): Promise<Session>;
   updateSessionNotes(id: string, notes: string): Promise<void>;
+  updateSessionRating(id: string, rating: number | null): Promise<void>;
   addSessionExercise(sessionId: string, exercise: Exercise): Promise<void>;
   updateSessionExercise(
     sessionId: string,
@@ -141,19 +153,8 @@ function initialLegacyTheme(): ThemeSetting | null {
 }
 
 async function syncIsConfigured(): Promise<boolean> {
-  const config = await readSyncState<{
-    enabled?: boolean;
-    connected?: boolean;
-    serverUrl?: string;
-  }>('config');
-  const sync = await readSyncState<{
-    enabled?: boolean;
-    connected?: boolean;
-    serverUrl?: string;
-  }>('sync');
-  return [config, sync].some(
-    (value) => value?.enabled === true || value?.connected === true || Boolean(value?.serverUrl),
-  );
+  const config = await readSyncState<SyncConfig>('app');
+  return config?.enabled === true;
 }
 
 function validateCustomInput(input: CustomExerciseInput, editingId?: string): void {
@@ -221,6 +222,31 @@ export function TrainerProvider({ children }: { children: ReactNode }) {
     setState((current) => (current.error === null ? current : { ...current, error: null }));
   }, []);
 
+  const refreshSnapshot = useCallback(async () => {
+    const snapshot = await loadSnapshot();
+    routinesRef.current = snapshot.routines;
+    sessionsRef.current = snapshot.sessions;
+    customRef.current = snapshot.customExercises;
+    settingsRef.current = snapshot.settings;
+    setState({
+      ready: true,
+      routines: snapshot.routines,
+      sessions: snapshot.sessions,
+      customExercises: snapshot.customExercises,
+      settings: snapshot.settings,
+      error: null,
+    });
+  }, []);
+
+  useEffect(() => {
+    registerApplyHandler(() => {
+      void refreshSnapshot().catch((error) => {
+        console.warn('Could not refresh Trainer after sync', error);
+      });
+    });
+    return () => registerApplyHandler(null);
+  }, [refreshSnapshot]);
+
   useEffect(() => {
     let cancelled = false;
     const legacyTheme = initialLegacyTheme();
@@ -244,6 +270,9 @@ export function TrainerProvider({ children }: { children: ReactNode }) {
           error: null,
         });
         void requestPersistentStorage();
+        void loadSyncRuntime().catch((error) => {
+          console.warn('Could not start Trainer sync', error);
+        });
       } catch (error) {
         if (cancelled) return;
         setState((current) => ({ ...current, ready: true, error: messageOf(error) }));
@@ -269,11 +298,18 @@ export function TrainerProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const mutateSession = useCallback(
-    async (sessionId: string, update: (session: Session) => Session): Promise<void> => {
+    async (
+      sessionId: string,
+      update: (session: Session) => Session,
+      allowFuturePlan = false,
+    ): Promise<void> => {
       try {
         const current = sessionsRef.current.find((session) => session.id === sessionId);
         if (!current) throw new Error('That session no longer exists.');
-        if (!isSessionEditable(current)) {
+        if (
+          !isSessionEditable(current) &&
+          !(allowFuturePlan && isSessionPlanEditable(current))
+        ) {
           throw new Error(
             current.date !== todayIso()
               ? 'Past sessions are read-only.'
@@ -314,6 +350,27 @@ export function TrainerProvider({ children }: { children: ReactNode }) {
     return task;
   }, [commitSessions, fail]);
 
+  const ensureSessionForDate = useCallback(
+    async (date: IsoDate): Promise<Session | null> => {
+      try {
+        const existing = sessionsRef.current.find((session) => session.date === date);
+        if (existing) return existing;
+        if (date < todayIso()) return null;
+        const routine = routinesRef.current.find((item) => item.active);
+        const slot = routine ? resolveSlot(routine, date) : null;
+        if (!routine || slot?.kind !== 'workout') return null;
+        const session = createSessionForSlot(slot, routine, 'planned', 'auto');
+        const saved = await writeSessionNew(session);
+        commitSessions([...sessionsRef.current, saved]);
+        return saved;
+      } catch (error) {
+        fail(error);
+        return null;
+      }
+    },
+    [commitSessions, fail],
+  );
+
   const createAdHocSession = useCallback(async (): Promise<Session> => {
     try {
       const date = todayIso();
@@ -333,6 +390,7 @@ export function TrainerProvider({ children }: { children: ReactNode }) {
         source: 'manual',
         exercises: [],
         notes: '',
+        rating: null,
         createdAt: timestamp,
         updatedAt: timestamp,
         completedAt: null,
@@ -349,6 +407,18 @@ export function TrainerProvider({ children }: { children: ReactNode }) {
   const updateSessionNotes = useCallback(
     (sessionId: string, notes: string) =>
       runSessionMutation(() => mutateSession(sessionId, (session) => ({ ...session, notes }))),
+    [mutateSession, runSessionMutation],
+  );
+
+  const updateSessionRating = useCallback(
+    (sessionId: string, rating: number | null) =>
+      runSessionMutation(() =>
+        mutateSession(sessionId, (session) => ({
+          ...session,
+          rating:
+            rating === null ? null : Math.min(5, Math.max(1, Math.round(rating))),
+        })),
+      ),
     [mutateSession, runSessionMutation],
   );
 
@@ -373,7 +443,7 @@ export function TrainerProvider({ children }: { children: ReactNode }) {
             sets: [],
           };
           return { ...session, exercises: [...session.exercises, row] };
-        }),
+        }, true),
       ),
     [mutateSession, runSessionMutation],
   );
@@ -395,7 +465,7 @@ export function TrainerProvider({ children }: { children: ReactNode }) {
           exercises: session.exercises.map((row) =>
             row.id === exerciseRowId ? { ...row, ...patch } : row,
           ),
-        })),
+        }), true),
       ),
     [mutateSession, runSessionMutation],
   );
@@ -408,7 +478,7 @@ export function TrainerProvider({ children }: { children: ReactNode }) {
           exercises: session.exercises
             .filter((row) => row.id !== exerciseRowId)
             .map((row, index) => ({ ...row, order: index })),
-        })),
+        }), true),
       ),
     [mutateSession, runSessionMutation],
   );
@@ -427,7 +497,7 @@ export function TrainerProvider({ children }: { children: ReactNode }) {
             ...session,
             exercises: rows.map((item, order) => ({ ...item, order })),
           };
-        }),
+        }, true),
       ),
     [mutateSession, runSessionMutation],
   );
@@ -615,6 +685,31 @@ export function TrainerProvider({ children }: { children: ReactNode }) {
     [commitRoutines, fail],
   );
 
+  const setRoutineActive = useCallback(
+    async (routineId: string, active: boolean) => {
+      if (active) {
+        await setActiveRoutine(routineId);
+        return;
+      }
+      try {
+        const current = routinesRef.current.find((routine) => routine.id === routineId);
+        if (!current) throw new Error('That routine no longer exists.');
+        const next = normalizeRoutine({
+          ...current,
+          active: false,
+          updatedAt: new Date().toISOString(),
+        });
+        const saved = await writeEntity('routine', next);
+        commitRoutines(
+          routinesRef.current.map((routine) => (routine.id === routineId ? saved : routine)),
+        );
+      } catch (error) {
+        fail(error);
+      }
+    },
+    [commitRoutines, fail, setActiveRoutine],
+  );
+
   const checkNameConflict = useCallback(async (name: string, editingId?: string) => {
     const candidate = normalizeExerciseText(name);
     const catalogue = await loadCatalogue(customRef.current);
@@ -772,9 +867,12 @@ export function TrainerProvider({ children }: { children: ReactNode }) {
       updateRoutine,
       deleteRoutine,
       setActiveRoutine,
+      setRoutineActive,
       ensureSessions,
+      ensureSessionForDate,
       createAdHocSession,
       updateSessionNotes,
+      updateSessionRating,
       addSessionExercise,
       updateSessionExercise,
       removeSessionExercise,
@@ -799,9 +897,12 @@ export function TrainerProvider({ children }: { children: ReactNode }) {
       updateRoutine,
       deleteRoutine,
       setActiveRoutine,
+      setRoutineActive,
       ensureSessions,
+      ensureSessionForDate,
       createAdHocSession,
       updateSessionNotes,
+      updateSessionRating,
       addSessionExercise,
       updateSessionExercise,
       removeSessionExercise,

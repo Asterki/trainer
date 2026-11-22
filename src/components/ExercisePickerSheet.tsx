@@ -19,12 +19,14 @@ import { useDebouncedValue } from '../state/hooks';
 import { useTrainer } from '../state/store';
 import { BottomSheet } from './BottomSheet';
 import { CustomExerciseForm } from './CustomExerciseForm';
+import { ExerciseThumb } from './ExerciseMedia';
 
 interface ExercisePickerSheetProps {
   open: boolean;
   session: Session | null;
   onClose: () => void;
   onAdd: (exercise: Exercise) => Promise<void>;
+  onRemove: (exerciseRowId: string) => Promise<void>;
 }
 
 type PickerMode = 'picker' | 'custom';
@@ -34,6 +36,7 @@ export function ExercisePickerSheet({
   session,
   onClose,
   onAdd,
+  onRemove,
 }: ExercisePickerSheetProps) {
   const { customExercises } = useTrainer();
   const [mode, setMode] = useState<PickerMode>('picker');
@@ -80,12 +83,22 @@ export function ExercisePickerSheet({
     [catalogue, category, debouncedQuery, equipment, muscle],
   );
 
-  async function addExercise(exercise: Exercise) {
-    if (addingId !== null || added.has(exercise.id)) return;
+  async function toggleExercise(exercise: Exercise) {
+    if (addingId !== null) return;
+    const row = session?.exercises.find((item) => item.exerciseId === exercise.id);
     setAddingId(exercise.id);
     try {
-      await onAdd(exercise);
-      setAdded((current) => new Set(current).add(exercise.id));
+      if (row) {
+        await onRemove(row.id);
+        setAdded((current) => {
+          const next = new Set(current);
+          next.delete(exercise.id);
+          return next;
+        });
+      } else {
+        await onAdd(exercise);
+        setAdded((current) => new Set(current).add(exercise.id));
+      }
     } catch {
       /* The store surfaces the error banner. */
     } finally {
@@ -109,11 +122,8 @@ export function ExercisePickerSheet({
       footer={
         mode === 'picker' ? (
           <div className="sheet-actions">
-            <button type="button" className="button" onClick={onClose}>
-              Cancel
-            </button>
             <button type="button" className="button button--primary" onClick={onClose}>
-              Done ({session?.exercises.length ?? 0})
+              Done
             </button>
           </div>
         ) : undefined
@@ -124,7 +134,7 @@ export function ExercisePickerSheet({
           onClose={() => setMode('picker')}
           onSaved={(exercise) => {
             setMode('picker');
-            void addExercise(exercise);
+            void toggleExercise(exercise);
           }}
         />
       ) : (
@@ -189,6 +199,8 @@ export function ExercisePickerSheet({
             Create a custom exercise
           </button>
 
+          <p className="picker__honesty">Exercises are added as you tap them.</p>
+
           {loading ? (
             <div className="view-loading" role="status">
               Loading exercises…
@@ -215,10 +227,11 @@ export function ExercisePickerSheet({
                     <button
                       type="button"
                       className={`picker__result${isAdded ? ' picker__result--added' : ''}`}
-                      onClick={() => void addExercise(exercise)}
-                      disabled={isAdded || addingId === exercise.id}
+                      onClick={() => void toggleExercise(exercise)}
+                      disabled={addingId === exercise.id}
                       aria-pressed={isAdded}
                     >
+                      <ExerciseThumb exercise={exercise} />
                       <span className="picker__result-main">
                         <span className="picker__result-name">{exercise.name}</span>
                         <span className="picker__result-meta">
@@ -231,7 +244,7 @@ export function ExercisePickerSheet({
                       <span className="picker__result-state">
                         {isAdded ? (
                           <>
-                            <FiCheck aria-hidden="true" /> Added
+                            <FiCheck aria-hidden="true" /> Added · tap to remove
                           </>
                         ) : addingId === exercise.id ? (
                           'Adding…'

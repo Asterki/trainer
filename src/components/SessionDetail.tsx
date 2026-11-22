@@ -1,18 +1,20 @@
 import { FiX } from 'react-icons/fi';
 import { fromIsoDate } from '../domain/date';
+import { sessionFeeling } from '../domain/metrics';
 import {
   deriveSessionStatus,
   sessionSetCount,
   sessionVolume,
 } from '../domain/session';
 import type { Session } from '../domain/types';
+import { formatVolume, formatWeight } from '../domain/units';
+import { useTrainer } from '../state/store';
 
 interface SessionDetailProps {
   session: Session;
   onClose?: () => void;
 }
 
-const numberFormat = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
 const SOURCE_LABELS = {
   ai: 'AI plan',
   manual: 'Ad-hoc',
@@ -29,6 +31,8 @@ function formatDate(value: string): string {
 }
 
 export function SessionDetail({ session, onClose }: SessionDetailProps) {
+  const { settings } = useTrainer();
+  const unit = settings.weightUnit;
   const status = deriveSessionStatus(session);
   const statusLabel =
     status === 'in-progress'
@@ -83,7 +87,7 @@ export function SessionDetail({ session, onClose }: SessionDetailProps) {
             </div>
             <div>
               <span className="stat__label">Volume</span>
-              <strong>{numberFormat.format(totalVolume)} kg</strong>
+              <strong>{formatVolume(totalVolume, unit)} {unit}</strong>
             </div>
           </div>
 
@@ -111,23 +115,33 @@ export function SessionDetail({ session, onClose }: SessionDetailProps) {
                       <ol className="session-detail__sets">
                         {exercise.sets.map((set) => (
                           <li key={set.id}>
-                            <span>{set.weight} kg</span>
+                            <span>{formatWeight(set.weight, unit)} {unit}</span>
                             <span>× {set.reps}</span>
                             <span className="session-detail__set-volume">
-                              {numberFormat.format(set.weight * set.reps)} kg
+                              {formatVolume(set.weight * set.reps, unit)} {unit}
                             </span>
                           </li>
                         ))}
                       </ol>
                     )}
                     <p className="session-detail__exercise-total">
-                      {exercise.sets.length} sets · {numberFormat.format(volume)} kg
+                      {exercise.sets.length} {exercise.sets.length === 1 ? 'set' : 'sets'} ·{' '}
+                      {formatVolume(volume, unit)} {unit}
                     </p>
                   </li>
                 );
               })}
             </ul>
           )}
+
+          {session.rating !== null ? (
+            <section className="session-detail__notes">
+              <h3>Feeling</h3>
+              <p>
+                {sessionFeeling(session.rating)} · {session.rating}/5
+              </p>
+            </section>
+          ) : null}
 
           {session.notes ? (
             <section className="session-detail__notes">

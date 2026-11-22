@@ -8,7 +8,6 @@ import {
   FiTrendingUp,
 } from 'react-icons/fi';
 import type { IconType } from 'react-icons';
-import { BrandMark } from './BrandMark';
 import type { NavState, ViewKey } from '../state/navigation';
 
 interface NavItem {
@@ -36,12 +35,8 @@ export function Sidebar({ nav, onNavigate }: SidebarProps) {
   return (
     <aside className="rail" aria-label="Primary navigation">
       <div className="rail__brand">
-        <span className="rail__brand-mark">
-          <BrandMark />
-        </span>
         <span className="rail__brand-text">
           <span className="rail__brand-name">Trainer</span>
-          <span className="rail__brand-sub">Train on your terms</span>
         </span>
       </div>
 
@@ -74,7 +69,6 @@ export function Sidebar({ nav, onNavigate }: SidebarProps) {
 
       <div className="rail__footer">
         <span className="rail__build">v{__APP_VERSION__}</span>
-        <span className="rail__build-note">Data stays on this device</span>
       </div>
     </aside>
   );

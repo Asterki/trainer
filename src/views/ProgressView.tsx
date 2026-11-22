@@ -2,21 +2,24 @@ import { useEffect, useMemo, useState } from 'react';
 import { FiArrowRight } from 'react-icons/fi';
 import { BottomSheet } from '../components/BottomSheet';
 import { ExerciseDetail } from '../components/ExerciseDetail';
-import { MuscleBars } from '../components/MuscleBars';
+import { MuscleDiagram } from '../components/MuscleDiagram';
 import { RangePicker } from '../components/RangePicker';
 import { StackedBars } from '../components/charts/StackedBars';
-import { TrendChart } from '../components/charts/TrendChart';
 import { MUSCLE_GROUPS, MUSCLE_GROUP_LABELS } from '../domain/catalogue/groups';
 import { loadCatalogue, normalizeExerciseText } from '../domain/catalogue/wger';
 import { addDays, fromIsoDate } from '../domain/date';
 import {
   adherence,
+  computePrs,
   muscleWeeks,
   recentPrs,
   sessionSummaries,
+  trainingStreak,
   weeksRangeStart,
+  type MuscleWeek,
 } from '../domain/metrics';
 import { sessionSetCount, sessionVolume } from '../domain/session';
+import { formatBodyWeight, formatVolume, formatWeight } from '../domain/units';
 import type { MuscleGroupId } from '../domain/types';
 import { useDebouncedValue, useMediaQuery } from '../state/hooks';
 import { useTrainer } from '../state/store';
@@ -43,12 +46,6 @@ interface ExerciseRow {
   totalVolume: number;
 }
 
-const compactFormat = new Intl.NumberFormat(undefined, {
-  notation: 'compact',
-  maximumFractionDigits: 1,
-});
-const numberFormat = new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 });
-
 function formatDate(value: string): string {
   return new Intl.DateTimeFormat(undefined, {
     day: 'numeric',
@@ -67,6 +64,24 @@ function percent(value: number): string {
   return `${Math.round(value * 100)}%`;
 }
 
+function weekFocus(week: MuscleWeek) {
+  const entries = MUSCLE_GROUPS.map((muscle) => ({
+    id: muscle.id,
+    label: muscle.label,
+    sets: week.sets[muscle.id] ?? 0,
+    volume: week.muscles[muscle.id] ?? 0,
+  }))
+    .filter((entry) => entry.sets > 0)
+    .sort((a, b) => b.sets - a.sets || b.volume - a.volume);
+
+  return {
+    primary: entries.slice(0, 3).map((entry) => entry.id),
+    secondary: entries.slice(3, 7).map((entry) => entry.id),
+    top: entries.slice(0, 4).map((entry) => entry.label),
+    totalSets: entries.reduce((total, entry) => total + entry.sets, 0),
+  };
+}
+
 export function ProgressView({
   today,
   onOpenToday,
@@ -74,12 +89,11 @@ export function ProgressView({
   onOpenSettings,
   onOpenHistory,
 }: ProgressViewProps) {
-  const { sessions, customExercises } = useTrainer();
+  const { sessions, customExercises, settings } = useTrainer();
+  const unit = settings.weightUnit;
+  const streak = trainingStreak(sessions, today);
   const [tab, setTab] = useState<ProgressTab>('overview');
   const [range, setRange] = useState(12);
-  const [trendMuscle, setTrendMuscle] = useState<MuscleGroupId>('pectoralis-major');
-  const [muscleMetric, setMuscleMetric] = useState<'volume' | 'sets'>('volume');
-  const [showMuscleTable, setShowMuscleTable] = useState(false);
   const [selectedExercise, setSelectedExercise] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [muscleFilter, setMuscleFilter] = useState<MuscleGroupId | ''>('');
@@ -110,15 +124,15 @@ export function ProgressView({
     const volume = completed.reduce((total, session) => total + sessionVolume(session), 0);
     const adherenceData = adherence(sessions, range, today);
     const weeks = muscleWeeks(sessions, range, today);
-    const muscleTotals: Partial<Record<MuscleGroupId, number>> = {};
-    const setTotals: Partial<Record<MuscleGroupId, number>> = {};
-
-    for (const week of weeks) {
-      for (const muscle of MUSCLE_GROUPS) {
-        muscleTotals[muscle.id] = (muscleTotals[muscle.id] ?? 0) + (week.muscles[muscle.id] ?? 0);
-        setTotals[muscle.id] = (setTotals[muscle.id] ?? 0) + (week.sets[muscle.id] ?? 0);
-      }
-    }
+    const allCompleted = sessions.filter((session) => session.status === 'completed');
+    const allSets = allCompleted.reduce(
+      (total, session) => total + sessionSetCount(session),
+      0,
+    );
+    const bmi =
+      settings.heightCm && settings.bodyWeightKg
+        ? settings.bodyWeightKg / (settings.heightCm / 100) ** 2
+        : null;
 
     return {
       completed,
@@ -126,8 +140,10 @@ export function ProgressView({
       volume,
       adherence: adherenceData,
       weeks,
-      muscleTotals,
-      setTotals,
+      allCompleted,
+      allSets,
+      allPrs: computePrs(sessions),
+      bmi,
       prs: recentPrs(sessions, 30, today),
       recent: [...sessions]
         .filter((session) => session.status === 'completed' || session.status === 'skipped')
@@ -135,7 +151,7 @@ export function ProgressView({
         .slice(0, 5),
       summaries: sessionSummaries(sessions),
     };
-  }, [range, sessions, today]);
+  }, [range, sessions, settings.bodyWeightKg, settings.heightCm, today]);
 
   const exerciseRows = useMemo(() => {
     const rows = new Map<string, ExerciseRow>();
@@ -209,30 +225,47 @@ export function ProgressView({
       skipped: bucket.skipped,
     }))
     .slice(-Math.min(8, range));
-  const trendValues = overview.weeks.map(
-    (week) => (muscleMetric === 'volume' ? week.muscles[trendMuscle] : week.sets[trendMuscle]) ?? 0,
-  );
-  const trendPoints = overview.weeks.map((week, index) => ({
+  const focusWeeks = overview.weeks.map((week, index) => ({
+    ...weekFocus(week),
+    week: week.week,
     label: weekLabels[index] ?? week.week,
-    value: trendValues[index] ?? 0,
-    detail:
-      muscleMetric === 'volume'
-        ? `${numberFormat.format(trendValues[index] ?? 0)} kg`
-        : `${numberFormat.format(trendValues[index] ?? 0)} weighted sets`,
   }));
-
-  useEffect(() => {
-    if (overview.weeks.length === 0) return;
-    const current = overview.weeks.reduce(
-      (total, week) => total + (week.muscles[trendMuscle] ?? 0),
-      0,
-    );
-    if (current > 0) return;
-    const next = MUSCLE_GROUPS.find((muscle) =>
-      overview.weeks.some((week) => (week.muscles[muscle.id] ?? 0) > 0),
-    );
-    if (next && next.id !== trendMuscle) setTrendMuscle(next.id);
-  }, [overview.weeks, trendMuscle]);
+  const latestFocus =
+    [...focusWeeks].reverse().find((week) => week.totalSets > 0) ??
+    focusWeeks[focusWeeks.length - 1] ??
+    null;
+  const milestones = [
+    {
+      label: 'First workout',
+      hint: 'Complete one session',
+      unlocked: overview.allCompleted.length >= 1,
+    },
+    {
+      label: 'Five sessions',
+      hint: 'Complete 5 sessions',
+      unlocked: overview.allCompleted.length >= 5,
+    },
+    {
+      label: 'Twenty-five',
+      hint: 'Complete 25 sessions',
+      unlocked: overview.allCompleted.length >= 25,
+    },
+    {
+      label: 'Four in a row',
+      hint: 'Reach a 4-workout streak',
+      unlocked: streak.best >= 4,
+    },
+    {
+      label: 'Century',
+      hint: 'Log 100 sets',
+      unlocked: overview.allSets >= 100,
+    },
+    {
+      label: 'PR collector',
+      hint: 'Set 10 all-time PRs',
+      unlocked: overview.allPrs.length >= 10,
+    },
+  ];
 
   const openExercise = (exerciseId: string) => {
     setSelectedExercise(exerciseId);
@@ -309,7 +342,7 @@ export function ProgressView({
                 <div className="stat">
                   <span className="stat__label">Total volume</span>
                   <strong className="stat__value">
-                    {compactFormat.format(overview.volume)} kg
+                    {formatVolume(overview.volume, unit)} {unit}
                   </strong>
                   <span className="stat__hint">weight × reps</span>
                 </div>
@@ -318,6 +351,31 @@ export function ProgressView({
                   <strong className="stat__value">{overview.sets}</strong>
                   <span className="stat__hint">completed sessions only</span>
                 </div>
+                <div className="stat">
+                  <span className="stat__label">Current streak</span>
+                  <strong className="stat__value">{streak.current}</strong>
+                  <span className="stat__hint">
+                    best: {streak.best} {streak.best === 1 ? 'workout' : 'workouts'}
+                  </span>
+                </div>
+                {settings.bodyWeightKg !== null ? (
+                  <div className="stat">
+                    <span className="stat__label">Body weight</span>
+                    <strong className="stat__value">
+                      {formatBodyWeight(settings.bodyWeightKg, unit)}
+                    </strong>
+                    <span className="stat__hint">
+                      {settings.heightCm !== null ? `${settings.heightCm} cm tall` : 'update in Settings'}
+                    </span>
+                  </div>
+                ) : null}
+                {overview.bmi !== null ? (
+                  <div className="stat">
+                    <span className="stat__label">BMI</span>
+                    <strong className="stat__value">{overview.bmi.toFixed(1)}</strong>
+                    <span className="stat__hint">body weight ÷ height²</span>
+                  </div>
+                ) : null}
                 <div className="stat">
                   <span className="stat__label">Adherence</span>
                   <strong className="stat__value">
@@ -358,25 +416,50 @@ export function ProgressView({
               <section className="card progress-section">
                 <div className="progress-section__head">
                   <div>
-                    <h2 className="card__title">Muscle balance</h2>
-                    <p className="card__hint">
-                      Volume = weight × reps. Primary muscles get full credit, secondary half.
-                    </p>
+                    <h2 className="card__title">Latest week focus</h2>
+                    <p className="card__hint">Most recent week with logged training.</p>
                   </div>
                   <button
                     type="button"
                     className="link-button"
                     onClick={() => setTab('muscles')}
                   >
-                    Muscle details
+                    Week by week
                   </button>
                 </div>
-                <MuscleBars
-                  values={overview.muscleTotals}
-                  valueLabel="kg"
-                  format={(value) => compactFormat.format(value)}
-                  emptyText="No muscle volume in this range."
-                />
+                {latestFocus && latestFocus.totalSets > 0 ? (
+                  <>
+                    <MuscleDiagram
+                      primary={latestFocus.primary}
+                      secondary={latestFocus.secondary}
+                    />
+                    <p className="week-focus__top">
+                      {latestFocus.top.join(' · ')}
+                    </p>
+                  </>
+                ) : (
+                  <p className="chart-empty">No muscle work in this range.</p>
+                )}
+              </section>
+
+              <section className="card progress-section">
+                <div className="progress-section__head">
+                  <div>
+                    <h2 className="card__title">Milestones</h2>
+                    <p className="card__hint">Unlocked from your logged training.</p>
+                  </div>
+                </div>
+                <ul className="achievement-grid">
+                  {milestones.map((milestone) => (
+                    <li
+                      key={milestone.label}
+                      className={`achievement${milestone.unlocked ? ' achievement--unlocked' : ''}`}
+                    >
+                      <strong>{milestone.label}</strong>
+                      <span>{milestone.unlocked ? 'Unlocked' : milestone.hint}</span>
+                    </li>
+                  ))}
+                </ul>
               </section>
 
               <section className="card progress-section">
@@ -402,7 +485,7 @@ export function ProgressView({
                           <span>
                             <strong>{entry.name}</strong>
                             <span className="pr-recent__detail">
-                              {entry.weight} kg × {entry.reps} reps
+                              {formatWeight(entry.weight, unit)} {unit} × {entry.reps} reps
                             </span>
                           </span>
                           <span className="pr-recent__date">{formatDate(entry.date)}</span>
@@ -439,7 +522,7 @@ export function ProgressView({
                             <span className="history-row__sets">
                               {session.status === 'skipped'
                                 ? 'No workout logged'
-                                : `${summary?.sets ?? 0} sets · ${summary?.exercises ?? 0} exercises`}
+                                : `${summary?.sets ?? 0} ${(summary?.sets ?? 0) === 1 ? 'set' : 'sets'} · ${summary?.exercises ?? 0} ${(summary?.exercises ?? 0) === 1 ? 'exercise' : 'exercises'}`}
                             </span>
                           </span>
                           <span className={`badge badge--${session.status}`}>
@@ -514,7 +597,7 @@ export function ProgressView({
                           <span className="exercise-index__metric">
                             <strong>
                               {row.bestWeight > 0
-                                ? `${numberFormat.format(row.bestWeight)} × ${row.bestReps}`
+                                ? `${formatWeight(row.bestWeight, unit)} ${unit} × ${row.bestReps}`
                                 : `${row.bestReps} reps`}
                             </strong>
                             <span>
@@ -538,112 +621,33 @@ export function ProgressView({
             <>
               <div className="progress-toolbar">
                 <RangePicker value={range} onChange={setRange} />
-                <div className="segmented" role="group" aria-label="Muscle metric">
-                  <button
-                    type="button"
-                    className={`segmented__item${muscleMetric === 'volume' ? ' segmented__item--active' : ''}`}
-                    aria-pressed={muscleMetric === 'volume'}
-                    onClick={() => setMuscleMetric('volume')}
-                  >
-                    Volume
-                  </button>
-                  <button
-                    type="button"
-                    className={`segmented__item${muscleMetric === 'sets' ? ' segmented__item--active' : ''}`}
-                    aria-pressed={muscleMetric === 'sets'}
-                    onClick={() => setMuscleMetric('sets')}
-                  >
-                    Weighted sets
-                  </button>
-                </div>
               </div>
               <p className="definition-line">
-                Volume = weight × reps. Primary muscles get full credit, secondary half.
+                Red marks the three muscles with the most weighted sets that week; amber marks the
+                next four.
               </p>
-
-              <section className="card progress-section">
-                <div className="progress-section__head">
-                  <h2 className="card__title">
-                    {muscleMetric === 'volume' ? 'Volume by muscle' : 'Weighted sets by muscle'}
-                  </h2>
+              {focusWeeks.every((week) => week.totalSets === 0) ? (
+                <p className="chart-empty">No completed muscle work in this range.</p>
+              ) : (
+                <div className="weekly-focus-grid">
+                  {focusWeeks
+                    .filter((week) => week.totalSets > 0)
+                    .map((week) => (
+                      <section className="card weekly-focus" key={week.week}>
+                        <header>
+                          <h2 className="card__title">Week of {week.label}</h2>
+                          <span>{week.totalSets.toFixed(1)} weighted sets</span>
+                        </header>
+                        <MuscleDiagram
+                          primary={week.primary}
+                          secondary={week.secondary}
+                          compact
+                        />
+                        <p className="week-focus__top">{week.top.join(' · ')}</p>
+                      </section>
+                    ))}
                 </div>
-                <MuscleBars
-                  values={muscleMetric === 'volume' ? overview.muscleTotals : overview.setTotals}
-                  valueLabel={muscleMetric === 'volume' ? 'kg' : 'weighted sets'}
-                  format={(value) => compactFormat.format(value)}
-                  defaultLimit={18}
-                />
-                <button
-                  type="button"
-                  className="button progress-section__table-toggle"
-                  onClick={() => setShowMuscleTable((current) => !current)}
-                >
-                  {showMuscleTable ? 'Hide table' : 'Show table'}
-                </button>
-                {showMuscleTable ? (
-                  <div className="table-scroll">
-                    <table className="data-table">
-                      <caption className="visually-hidden">
-                        Muscle volume and weighted sets in the selected range
-                      </caption>
-                      <thead>
-                        <tr>
-                          <th scope="col">Muscle</th>
-                          <th scope="col">Volume (kg)</th>
-                          <th scope="col">Weighted sets</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {MUSCLE_GROUPS.map((muscle) => (
-                          <tr key={muscle.id}>
-                            <th scope="row">{muscle.label}</th>
-                            <td>{numberFormat.format(overview.muscleTotals[muscle.id] ?? 0)}</td>
-                            <td>{numberFormat.format(overview.setTotals[muscle.id] ?? 0)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                ) : null}
-              </section>
-
-              <section className="card progress-section">
-                <div className="progress-section__head">
-                  <div>
-                    <h2 className="card__title">Weekly trend</h2>
-                    <p className="card__hint">
-                      {muscleMetric === 'volume'
-                        ? 'Attributed volume per ISO week.'
-                        : 'Weighted sets per ISO week.'}
-                    </p>
-                  </div>
-                  <label className="field field--inline">
-                    <span className="field__label">Muscle</span>
-                    <select
-                      className="input"
-                      value={trendMuscle}
-                      onChange={(event) => setTrendMuscle(event.target.value as MuscleGroupId)}
-                    >
-                      {MUSCLE_GROUPS.map((muscle) => (
-                        <option key={muscle.id} value={muscle.id}>
-                          {muscle.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
-                <TrendChart
-                  points={trendPoints}
-                  ariaLabel={`${MUSCLE_GROUP_LABELS[trendMuscle]} ${
-                    muscleMetric === 'volume' ? 'volume' : 'weighted sets'
-                  } over ${range} weeks`}
-                  valueFormat={(value) =>
-                    muscleMetric === 'volume'
-                      ? `${numberFormat.format(value)} kg`
-                      : `${numberFormat.format(value)} weighted sets`
-                  }
-                />
-              </section>
+              )}
             </>
           ) : null}
         </>

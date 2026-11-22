@@ -34,7 +34,7 @@ export function TrendChart({
           {point.detail ?? valueFormat(point.value)}.
         </p>
         <details className="chart-table">
-          <summary>View data table</summary>
+          <summary>Chart data</summary>
           <table>
             <caption>{ariaLabel}</caption>
             <thead>
@@ -132,7 +132,7 @@ export function TrendChart({
         })}
       </svg>
       <details className="chart-table">
-        <summary>View data table</summary>
+        <summary>Chart data</summary>
         <table>
           <caption>{ariaLabel}</caption>
           <thead>

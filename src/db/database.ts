@@ -43,6 +43,7 @@ export interface DatabaseSnapshot {
 
 export interface OutboxRecord {
   seq?: number;
+  changeId: string;
   entityType: SyncEntityKind;
   entityId: string;
   hlc: string;
@@ -55,6 +56,23 @@ export interface VersionRecord {
   entityId: string;
   hlc: string;
   deleted: boolean;
+}
+
+export interface MutationEvent {
+  kind: SyncEntityKind;
+  puts: unknown[];
+  deletes: string[];
+}
+
+let mutationListener: ((event: MutationEvent) => void) | null = null;
+
+/** Registers the recorder. Sync stays optional; with no listener writes are local-only. */
+export function setMutationListener(listener: ((event: MutationEvent) => void) | null): void {
+  mutationListener = listener;
+}
+
+function emit(kind: SyncEntityKind, puts: unknown[], deletes: string[] = []): void {
+  mutationListener?.({ kind, puts, deletes });
 }
 
 let dbPromise: Promise<IDBDatabase> | null = null;
@@ -169,7 +187,7 @@ function normalizeEntity(
   return normalizeSettings(value);
 }
 
-async function persist(kind: DomainEntityKind, value: unknown): Promise<void> {
+async function persist(kind: DomainEntityKind, value: unknown, silent = false): Promise<unknown> {
   const normalized = normalizeEntity(kind, value);
   let stored: unknown = normalized;
   if (kind === 'routine') {
@@ -185,6 +203,8 @@ async function persist(kind: DomainEntityKind, value: unknown): Promise<void> {
     kind === 'settings' ? SETTINGS_KEY : undefined,
   );
   await transactionDone(tx);
+  if (!silent) emit(kind, [normalized]);
+  return normalized;
 }
 
 /** Writes a complete routine list in one transaction. */
@@ -235,13 +255,12 @@ export async function readEntity<T>(kind: DomainEntityKind, entityId: string): P
 
 /** Normalized write used by domain actions. */
 export async function writeEntity<T>(kind: DomainEntityKind, value: T): Promise<T> {
-  await persist(kind, value);
-  return normalizeEntity(kind, value) as T;
+  return (await persist(kind, value)) as T;
 }
 
 /** Applies remote data without echo. Stage 7 uses this after a merge. */
 export async function writeEntitySilently(kind: DomainEntityKind, value: unknown): Promise<void> {
-  await persist(kind, value);
+  await persist(kind, value, true);
 }
 
 /** Creates a session only if its calendar date has no existing session. */
@@ -255,6 +274,7 @@ export async function writeSessionNew(value: unknown): Promise<Session> {
   }
   tx.objectStore(STORE.sessions).put(session);
   await transactionDone(tx);
+  emit('session', [session]);
   return session;
 }
 
@@ -270,29 +290,52 @@ export async function applySessionBootstrap(
   const tx = database.transaction(STORE.sessions, 'readwrite');
   const store = tx.objectStore(STORE.sessions);
   const dateIndex = store.index('date');
+  const written: Session[] = [];
 
   for (const update of updates) {
     const current = await request(store.get(update.id));
-    if (current !== undefined) store.put(normalizeEntity('session', update));
+    if (current !== undefined) {
+      const session = normalizeEntity('session', update);
+      store.put(session);
+      written.push(session);
+    }
   }
 
   for (const create of creates) {
     const session = normalizeEntity('session', create);
     const sameDate = await request(dateIndex.getAll(session.date));
-    if (sameDate.length === 0) store.put(session);
+    if (sameDate.length === 0) {
+      store.put(session);
+      written.push(session);
+    }
   }
 
   await transactionDone(tx);
+  emit('session', written);
 
   const readTx = database.transaction(STORE.sessions, 'readonly');
   return normalizeSessions(await request(readTx.objectStore(STORE.sessions).getAll()));
 }
 
 export async function deleteEntity(kind: DomainEntityKind, entityId: string): Promise<void> {
+  await deleteEntityInternal(kind, entityId, false);
+}
+
+/** Deletes a remotely removed entity without echoing it to the outbox. */
+export async function deleteEntitySilently(kind: DomainEntityKind, entityId: string): Promise<void> {
+  await deleteEntityInternal(kind, entityId, true);
+}
+
+async function deleteEntityInternal(
+  kind: DomainEntityKind,
+  entityId: string,
+  silent: boolean,
+): Promise<void> {
   const database = await openDatabase();
   const tx = database.transaction(storeForKind(kind), 'readwrite');
   tx.objectStore(storeForKind(kind)).delete(kind === 'settings' ? SETTINGS_KEY : entityId);
   await transactionDone(tx);
+  if (!silent) emit(kind, [], [entityId]);
 }
 
 /** Ensures the singleton settings row exists. Existing settings are untouched. */
@@ -373,6 +416,7 @@ export async function setActiveRoutineAtomic(entityId: string): Promise<Routine[
   );
   for (const routine of next) store.put(storedRoutine(routine));
   await transactionDone(tx);
+  emit('routine', next);
   return next;
 }
 
@@ -485,4 +529,15 @@ export async function putVersion(version: VersionRecord): Promise<void> {
   const tx = database.transaction(STORE.versions, 'readwrite');
   tx.objectStore(STORE.versions).put(version);
   await transactionDone(tx);
+}
+
+export async function getVersion(
+  kind: SyncEntityKind,
+  entityId: string,
+): Promise<VersionRecord | undefined> {
+  const database = await openDatabase();
+  const tx = database.transaction(STORE.versions, 'readonly');
+  return (await request(
+    tx.objectStore(STORE.versions).get([kind, entityId]),
+  )) as VersionRecord | undefined;
 }

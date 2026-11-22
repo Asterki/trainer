@@ -1,14 +1,16 @@
 /**
- * Tasker sync relay.
+ * Trainer sync relay.
  *
  * A deliberately small Express service: bearer-key identity, an append-only
- * change log per user, and a snapshot endpoint for new devices. Encrypted
- * payloads are stored as opaque strings. `/mcp` optionally lets an MCP client
- * join the space with the same passphrase; see `src/mcp/`.
+ * change log per user, a snapshot endpoint for new devices, and the
+ * passphrase-authenticated `/api/v1` contract used by n8n. Encrypted payloads
+ * are stored as opaque strings. `/mcp` optionally lets an MCP client join the
+ * space with the same passphrase; see `src/mcp/`.
  */
 
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import express, { type NextFunction, type Request, type Response } from 'express';
+import { apiRouter } from './api/index.js';
 import {
   ENTITY_TYPES,
   db,
@@ -30,7 +32,7 @@ const MAX_PAYLOAD = 300_000;
 const HLC_PATTERN = /^\d{15}-\d{6}-[A-Za-z0-9-]{6,64}$/;
 
 const allowedOrigins = [
-  ...(process.env.CORS_ORIGINS ?? 'https://tasker.asterki.xyz').split(','),
+  ...(process.env.CORS_ORIGINS ?? '').split(','),
   ...(process.env.MCP_ORIGINS ?? '').split(','),
 ]
   .map((origin) => origin.trim())
@@ -42,6 +44,28 @@ interface AuthedRequest extends Request {
 
 const app = express();
 app.disable('x-powered-by');
+
+/** Metadata-only request log: never bodies, headers, passphrases or payloads. */
+app.use((req: Request, res: Response, next: NextFunction) => {
+  const id = randomUUID();
+  const started = process.hrtime.bigint();
+  res.on('finish', () => {
+    const durationMs = Number(process.hrtime.bigint() - started) / 1_000_000;
+    console.log(
+      JSON.stringify({
+        id,
+        method: req.method,
+        path: req.originalUrl.split('?')[0],
+        status: res.statusCode,
+        durationMs: Math.round(durationMs),
+      }),
+    );
+  });
+  next();
+});
+
+// The API parses its own 256 KB JSON bodies and enforces its own CORS rules.
+app.use('/api/v1', apiRouter);
 app.use(express.json({ limit: '2mb' }));
 
 app.use((req: Request, res: Response, next: NextFunction) => {
@@ -49,7 +73,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   if (origin && allowedOrigins.includes(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Vary', 'Origin');
-    res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-Tasker-Passphrase, Mcp-Session-Id, MCP-Protocol-Version');
+    res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-Trainer-Passphrase, Mcp-Session-Id, MCP-Protocol-Version');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
     res.setHeader('Access-Control-Max-Age', '86400');
   }
@@ -101,7 +125,7 @@ function authenticate(req: Request, res: Response, next: NextFunction): void {
 }
 
 app.get('/health', (_req, res) => {
-  res.json({ ok: true, service: 'tasker-sync', mcp: MCP_ENABLED });
+  res.json({ ok: true, service: 'trainer-sync', api: true, mcp: MCP_ENABLED });
 });
 
 app.get('/v1/sync/head', authenticate, (req, res) => {
@@ -253,8 +277,22 @@ app.use((_req, res) => {
 });
 
 app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
-  console.error(error);
-  res.status(500).json({ error: 'internal' });
+  // Express body-parser errors carry a 4xx status; never expose messages or stacks.
+  const status =
+    typeof (error as { status?: unknown }).status === 'number'
+      ? (error as { status: number }).status
+      : 500;
+
+  if (status >= 400 && status < 500) {
+    res.status(status).json({
+      error: status === 413 ? 'body_too_large' : 'invalid_body',
+      message: status === 413 ? 'Request body is too large.' : 'Malformed request body.',
+    });
+    return;
+  }
+
+  console.error('request failed with status', status);
+  res.status(500).json({ error: 'internal', message: 'Internal server error.' });
 });
 
 purgeOldChanges(RETENTION_DAYS);
@@ -262,5 +300,5 @@ const purgeTimer = setInterval(() => purgeOldChanges(RETENTION_DAYS), 6 * 60 * 6
 purgeTimer.unref();
 
 app.listen(PORT, () => {
-  console.log(`tasker sync relay listening on ${PORT}`);
+  console.log(`trainer sync relay listening on ${PORT}`);
 });

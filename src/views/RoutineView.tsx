@@ -6,10 +6,10 @@ import {
   FiCalendar,
   FiCheck,
   FiCopy,
-  FiEdit2,
   FiPlus,
   FiRepeat,
   FiTrash2,
+  FiX,
 } from 'react-icons/fi';
 import { BottomSheet } from '../components/BottomSheet';
 import { ConfirmDialog } from '../components/ConfirmDialog';
@@ -18,7 +18,7 @@ import { RoutinePreview } from '../components/RoutinePreview';
 import { RoutineSlotSheet } from '../components/RoutineSlotSheet';
 import { isValidIsoDate, todayIso } from '../domain/date';
 import type { Routine, RoutineSlot, Weekday } from '../domain/types';
-import { useActiveRoutine, useMediaQuery } from '../state/hooks';
+import { useMediaQuery } from '../state/hooks';
 import { useTrainer } from '../state/store';
 
 const startDateFormat = new Intl.DateTimeFormat('en-GB', {
@@ -26,6 +26,8 @@ const startDateFormat = new Intl.DateTimeFormat('en-GB', {
   month: 'short',
   year: 'numeric',
 });
+
+const WEEKDAY_LABELS = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'];
 
 interface RoutineDraft {
   id: string | null;
@@ -39,11 +41,8 @@ interface RoutineDraft {
 
 type ConfirmState =
   | { type: 'delete'; routine: Routine }
-  | { type: 'activate'; id: string; name: string; startDate: string }
   | { type: 'clear-week'; weekIndex: number }
-  | { type: 'remove-week' }
-  | { type: 'discard' }
-  | { type: 'close' };
+  | { type: 'remove-week' };
 
 function cloneSlots(slots: RoutineSlot[]): RoutineSlot[] {
   return slots.map((slot) => ({ ...slot }));
@@ -87,7 +86,7 @@ function blankDraft(): RoutineDraft {
     startDate: todayIso(),
     weekCount: 1,
     slots: gridSlots(1),
-    active: false,
+    active: true,
   };
 }
 
@@ -104,26 +103,6 @@ function draftToRoutine(draft: RoutineDraft): Routine {
     createdAt: now,
     updatedAt: now,
   };
-}
-
-function sameDraft(a: RoutineDraft, b: RoutineDraft): boolean {
-  return (
-    a.name === b.name &&
-    a.notes === b.notes &&
-    a.startDate === b.startDate &&
-    a.weekCount === b.weekCount &&
-    a.slots.length === b.slots.length &&
-    a.slots.every((slot, index) => {
-      const other = b.slots[index];
-      return (
-        slot.weekIndex === other.weekIndex &&
-        slot.weekday === other.weekday &&
-        slot.kind === other.kind &&
-        slot.focus === other.focus &&
-        slot.note === other.note
-      );
-    })
-  );
 }
 
 function cleanedSlots(slots: RoutineSlot[]): RoutineSlot[] {
@@ -144,11 +123,10 @@ function focusInitials(focus: string): string {
   return `${words[0][0]}${words[1][0]}`.toUpperCase();
 }
 
-export function RoutineView({ onDirtyChange }: { onDirtyChange: (dirty: boolean) => void }) {
-  const { routines, createRoutine, updateRoutine, deleteRoutine, setActiveRoutine } =
+export function RoutineView() {
+  const { routines, createRoutine, updateRoutine, deleteRoutine, setActiveRoutine, setRoutineActive } =
     useTrainer();
   const isMobile = useMediaQuery('(max-width: 860px)');
-  const activeRoutine = useActiveRoutine();
   const [editor, setEditor] = useState<{
     draft: RoutineDraft;
     baseline: RoutineDraft;
@@ -160,29 +138,6 @@ export function RoutineView({ onDirtyChange }: { onDirtyChange: (dirty: boolean)
   const [toast, setToast] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const slotTrigger = useRef<HTMLButtonElement | null>(null);
-
-  const dirty = editor ? editor.isNew || !sameDraft(editor.draft, editor.baseline) : false;
-
-  useEffect(() => {
-    onDirtyChange(dirty);
-  }, [dirty, onDirtyChange]);
-
-  useEffect(
-    () => () => {
-      onDirtyChange(false);
-    },
-    [onDirtyChange],
-  );
-
-  useEffect(() => {
-    if (!dirty) return;
-    function beforeUnload(event: BeforeUnloadEvent) {
-      event.preventDefault();
-      event.returnValue = '';
-    }
-    window.addEventListener('beforeunload', beforeUnload);
-    return () => window.removeEventListener('beforeunload', beforeUnload);
-  }, [dirty]);
 
   useEffect(() => {
     if (!toast) return;
@@ -215,16 +170,23 @@ export function RoutineView({ onDirtyChange }: { onDirtyChange: (dirty: boolean)
     setEditor((current) => (current ? { ...current, draft: next } : current));
   }
 
-  function requestClose() {
+  async function toggleActive() {
     if (!editor) return;
-    if (dirty) setConfirmState({ type: 'close' });
-    else setEditor(null);
+    const active = !editor.draft.active;
+    setDraft({ ...editor.draft, active });
+    if (editor.isNew || !editor.draft.id) return;
+    await setRoutineActive(editor.draft.id, active);
+    setEditor((current) =>
+      current ? { ...current, baseline: { ...current.baseline, active } } : current,
+    );
+  }
+
+  function requestClose() {
+    setEditor(null);
   }
 
   function requestDiscard() {
-    if (!editor) return;
-    if (dirty) setConfirmState({ type: 'discard' });
-    else discardNow();
+    discardNow();
   }
 
   function discardNow() {
@@ -254,7 +216,7 @@ export function RoutineView({ onDirtyChange }: { onDirtyChange: (dirty: boolean)
     return null;
   }
 
-  async function save(activateAfter: boolean) {
+  async function save() {
     if (!editor) return;
     const problem = validate();
     if (problem) {
@@ -281,7 +243,6 @@ export function RoutineView({ onDirtyChange }: { onDirtyChange: (dirty: boolean)
           notes: editor.draft.notes.trim(),
           slots,
         };
-        setEditor({ draft: savedDraft, baseline: { ...savedDraft }, isNew: false });
         setToast(`Saved “${savedDraft.name}”.`);
       } else {
         const created = await createRoutine({
@@ -291,23 +252,12 @@ export function RoutineView({ onDirtyChange }: { onDirtyChange: (dirty: boolean)
           weekCount: editor.draft.weekCount,
           slots,
         });
-        savedDraft = draftFromRoutine(created);
-        setEditor({
-          draft: savedDraft,
-          baseline: draftFromRoutine(created),
-          isNew: false,
-        });
+        savedDraft = { ...draftFromRoutine(created), active: editor.draft.active };
+        if (savedDraft.active) await setRoutineActive(created.id, true);
         setToast(`Created “${created.name}”.`);
       }
 
-      if (activateAfter) {
-        setConfirmState({
-          type: 'activate',
-          id: savedDraft.id ?? '',
-          name: savedDraft.name,
-          startDate: savedDraft.startDate,
-        });
-      }
+      setEditor({ draft: savedDraft, baseline: { ...savedDraft }, isNew: false });
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Could not save the routine.');
     } finally {
@@ -387,26 +337,24 @@ export function RoutineView({ onDirtyChange }: { onDirtyChange: (dirty: boolean)
     closeSlotSheet();
   }
 
-  function requestActivate(routine: { id: string; name: string; startDate: string }) {
-    setConfirmState({ type: 'activate', ...routine });
-  }
-
-  async function activate(id: string, name: string) {
+  async function toggleRoutine(routine: { id: string; name: string; active: boolean }) {
     try {
-      await setActiveRoutine(id);
+      if (routine.active) {
+        await setRoutineActive(routine.id, false);
+      } else {
+        await setActiveRoutine(routine.id);
+      }
       setEditor((current) => {
-        if (!current || current.draft.id !== id) return current;
+        if (!current || current.draft.id !== routine.id) return current;
         return {
           ...current,
-          draft: { ...current.draft, active: true },
-          baseline: { ...current.baseline, active: true },
+          draft: { ...current.draft, active: !routine.active },
+          baseline: { ...current.baseline, active: !routine.active },
         };
       });
-      setToast(`“${name}” is now active.`);
-      setConfirmState(null);
+      setToast(`“${routine.name}” is now ${routine.active ? 'inactive' : 'active'}.`);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Could not activate the routine.');
-      setConfirmState(null);
+      setError(caught instanceof Error ? caught.message : 'Could not change the routine state.');
     }
   }
 
@@ -447,24 +395,6 @@ export function RoutineView({ onDirtyChange }: { onDirtyChange: (dirty: boolean)
         </p>
       );
     }
-    if (confirmState.type === 'activate') {
-      if (activeRoutine && activeRoutine.id !== confirmState.id) {
-        return (
-          <p>
-            “{activeRoutine.name}” will stop scheduling new sessions. “{confirmState.name}” starts
-            scheduling from {startDateFormat.format(new Date(`${confirmState.startDate}T12:00:00`))}.
-            Existing sessions and history are kept.
-          </p>
-        );
-      }
-      return (
-        <p>
-          Use “{confirmState.name}” from{' '}
-          {startDateFormat.format(new Date(`${confirmState.startDate}T12:00:00`))}? Existing sessions
-          are unchanged.
-        </p>
-      );
-    }
     if (confirmState.type === 'clear-week') {
       return (
         <p>
@@ -481,10 +411,7 @@ export function RoutineView({ onDirtyChange }: { onDirtyChange: (dirty: boolean)
         </p>
       );
     }
-    if (confirmState.type === 'discard') {
-      return <p>Discard changes and return to the last saved version of this routine?</p>;
-    }
-    return <p>Close the editor and discard your unsaved changes?</p>;
+    return null;
   }
 
   function confirmLabels() {
@@ -492,34 +419,19 @@ export function RoutineView({ onDirtyChange }: { onDirtyChange: (dirty: boolean)
     if (confirmState.type === 'delete') {
       return { title: 'Delete routine?', confirmLabel: 'Delete routine', tone: 'danger' as const };
     }
-    if (confirmState.type === 'activate') {
-      const switching = activeRoutine !== null && activeRoutine.id !== confirmState.id;
-      return {
-        title: switching ? 'Switch active routine?' : 'Set active routine?',
-        confirmLabel: switching ? 'Switch routine' : 'Set active',
-        tone: 'default' as const,
-      };
-    }
     if (confirmState.type === 'clear-week') {
       return { title: 'Clear week?', confirmLabel: 'Clear week', tone: 'danger' as const };
     }
     if (confirmState.type === 'remove-week') {
       return { title: 'Remove last week?', confirmLabel: 'Remove week', tone: 'danger' as const };
     }
-    if (confirmState.type === 'discard') {
-      return { title: 'Discard changes?', confirmLabel: 'Discard changes', tone: 'danger' as const };
-    }
-    return { title: 'Discard changes?', confirmLabel: 'Discard and close', tone: 'danger' as const };
+    return { title: '', confirmLabel: 'Confirm', tone: 'default' as const };
   }
 
   async function handleConfirm() {
     if (!confirmState) return;
     if (confirmState.type === 'delete') {
       await removeRoutine(confirmState.routine);
-      return;
-    }
-    if (confirmState.type === 'activate') {
-      await activate(confirmState.id, confirmState.name);
       return;
     }
     if (confirmState.type === 'clear-week') {
@@ -539,34 +451,16 @@ export function RoutineView({ onDirtyChange }: { onDirtyChange: (dirty: boolean)
     if (confirmState.type === 'remove-week') {
       if (editor) changeWeekCount(editor.draft.weekCount - 1);
       setConfirmState(null);
-      return;
     }
-    if (confirmState.type === 'discard') {
-      discardNow();
-      setConfirmState(null);
-      return;
-    }
-    setConfirmState(null);
-    setEditor(null);
   }
 
   const confirmCopy = confirmLabels();
-  const noActive = activeRoutine === null;
-  const editorActive = editor?.draft.active ?? false;
   const canSave =
     editor !== null &&
     editor.draft.name.trim().length >= 2 &&
     editor.draft.name.trim().length <= 60 &&
     isValidIsoDate(editor.draft.startDate);
-  const saveLabel = editor
-    ? editor.isNew
-      ? noActive
-        ? 'Create & set active'
-        : 'Create routine'
-      : noActive && !editorActive
-        ? 'Save & set active'
-        : 'Save changes'
-    : 'Save';
+  const saveLabel = editor?.isNew ? 'Create routine' : 'Save changes';
 
   function editorFooter() {
     return (
@@ -578,7 +472,7 @@ export function RoutineView({ onDirtyChange }: { onDirtyChange: (dirty: boolean)
           type="button"
           className="button button--primary"
           disabled={!canSave || saving}
-          onClick={() => void save(noActive && !editorActive)}
+          onClick={() => void save()}
         >
           {saving ? 'Saving…' : saveLabel}
         </button>
@@ -598,42 +492,28 @@ export function RoutineView({ onDirtyChange }: { onDirtyChange: (dirty: boolean)
         )}
 
         <header className="routine-editor__head">
-          <div>
+          <div className="routine-editor__title">
             <span className="view__eyebrow">Routine</span>
             <h1 className="view__title">
               {draft.name.trim() || (editor.isNew ? 'New routine' : 'Untitled routine')}
             </h1>
-            <p className="view__subtitle">
-              A repeating cycle of weeks. Each weekday is a workout focus or rest; exercises are
-              chosen per session.
-            </p>
           </div>
           <div className="routine-editor__status">
-            {dirty && <span className="badge badge--warning">Unsaved changes</span>}
-            {editorActive ? (
-              <span className="badge badge--active">
-                <FiCheck aria-hidden="true" /> Active
-              </span>
-            ) : (
-              draft.id && (
-                <button
-                  type="button"
-                  className="button"
-                  onClick={() => {
-                    const persisted = routines.find((routine) => routine.id === draft.id);
-                    if (persisted) {
-                      requestActivate({
-                        id: persisted.id,
-                        name: persisted.name,
-                        startDate: persisted.startDate,
-                      });
-                    }
-                  }}
-                >
-                  Set as active routine
-                </button>
-              )
-            )}
+            <div className="toggle-row routine-editor__active">
+              <div className="toggle-row__copy">
+                <span className="toggle-row__label">Active routine</span>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                className={`switch${draft.active ? ' switch--on' : ''}`}
+                aria-checked={draft.active}
+                aria-label="Active routine"
+                onClick={() => void toggleActive()}
+              >
+                <span className="switch__thumb" aria-hidden="true" />
+              </button>
+            </div>
           </div>
         </header>
 
@@ -659,7 +539,6 @@ export function RoutineView({ onDirtyChange }: { onDirtyChange: (dirty: boolean)
                 placeholder="PPL 2-week"
                 autoFocus={!isMobile}
               />
-              <span className="field__hint">2–60 characters.</span>
             </label>
 
             <label className="field">
@@ -672,7 +551,6 @@ export function RoutineView({ onDirtyChange }: { onDirtyChange: (dirty: boolean)
                 onChange={(event) => setDraft({ ...draft, startDate: event.target.value })}
                 required
               />
-              <span className="field__hint">Week 1 is the Monday-based week of this date.</span>
             </label>
 
             <div className="field">
@@ -724,9 +602,6 @@ export function RoutineView({ onDirtyChange }: { onDirtyChange: (dirty: boolean)
           <div className="routine-editor__section-head">
             <div>
               <h2 className="card__title">Weekly schedule</h2>
-              <p className="card__hint">
-                Select a day to set a focus or rest. Use the week menu to copy or clear a week.
-              </p>
             </div>
           </div>
           <RoutineGrid
@@ -761,8 +636,7 @@ export function RoutineView({ onDirtyChange }: { onDirtyChange: (dirty: boolean)
               <span className="view__eyebrow">Routine</span>
               <h1 className="view__title">Your training cycle</h1>
               <p className="view__subtitle">
-                A routine is a repeating cycle of weeks. Each weekday is a workout focus or rest; the
-                AI chooses exercises for each session.
+                Plan each workout, then log the sets as you train.
               </p>
             </div>
             {routines.length > 0 && (
@@ -780,8 +654,7 @@ export function RoutineView({ onDirtyChange }: { onDirtyChange: (dirty: boolean)
                 </span>
                 <h2 className="empty-state__title">Build a routine</h2>
                 <p className="empty-state__body">
-                  A routine is a repeating cycle of weeks, where each weekday is a workout focus or
-                  rest. The AI chooses the exercises for each session, and you log the work.
+                  A repeating cycle of weeks. Mark each weekday as a workout focus or rest.
                 </p>
                 <button type="button" className="button button--primary" onClick={openNew}>
                   <FiPlus aria-hidden="true" /> Create routine
@@ -822,7 +695,7 @@ export function RoutineView({ onDirtyChange }: { onDirtyChange: (dirty: boolean)
                         {startDateFormat.format(
                           new Date(`${routine.startDate}T12:00:00`),
                         )}{' '}
-                        · {routine.weekCount} {routine.weekCount === 1 ? 'week' : 'weeks'}
+                        · {routine.weekCount}-week cycle
                       </p>
                     </div>
 
@@ -832,26 +705,33 @@ export function RoutineView({ onDirtyChange }: { onDirtyChange: (dirty: boolean)
                           key={slot.weekday}
                           className={`routine-card__day routine-card__day--${slot.kind}`}
                         >
-                          {slot.kind === 'workout'
-                            ? focusInitials(slot.focus)
-                            : <span className="routine-card__rest-dot" />}
+                          {slot.kind === 'workout' ? (
+                            <span className="routine-card__day-initials">
+                              {focusInitials(slot.focus)}
+                            </span>
+                          ) : (
+                            <span className="routine-card__rest-dot" />
+                          )}
+                          <span className="routine-card__day-label">
+                            {WEEKDAY_LABELS[slot.weekday - 1]}
+                          </span>
                         </span>
                       ))}
                     </div>
 
                     <div className="routine-card__actions">
-                      <button type="button" className="button" onClick={() => openEditor(routine)}>
-                        <FiEdit2 aria-hidden="true" /> Edit
+                      <button
+                        type="button"
+                        className="button"
+                        onClick={() => void toggleRoutine(routine)}
+                      >
+                        {routine.active ? (
+                          <FiX aria-hidden="true" />
+                        ) : (
+                          <FiCheck aria-hidden="true" />
+                        )}{' '}
+                        {routine.active ? 'Deactivate' : 'Set active'}
                       </button>
-                      {!routine.active && (
-                        <button
-                          type="button"
-                          className="button"
-                          onClick={() => requestActivate(routine)}
-                        >
-                          <FiCheck aria-hidden="true" /> Set active
-                        </button>
-                      )}
                       <button
                         type="button"
                         className="button"

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   FiActivity,
+  FiBookOpen,
   FiDatabase,
   FiDownload,
   FiEdit2,
@@ -14,11 +15,13 @@ import {
   FiSun,
   FiTrash2,
   FiUpload,
+  FiUser,
 } from 'react-icons/fi';
 import { BottomSheet } from '../components/BottomSheet';
-import { BrandMark } from '../components/BrandMark';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { CustomExerciseForm } from '../components/CustomExerciseForm';
+import { SyncSettings } from '../components/SyncSettings';
+import { UserManual } from '../docs/UserManual';
 import {
   EQUIPMENT,
   MUSCLE_GROUPS,
@@ -27,6 +30,11 @@ import {
   EXERCISE_CATEGORY_LABELS,
 } from '../domain/catalogue/groups';
 import { loadCatalogue, searchExercises } from '../domain/catalogue/wger';
+import {
+  formatBodyWeight,
+  formatWeightInput,
+  weightToKg,
+} from '../domain/units';
 import {
   downloadBackup,
   readBackupFile,
@@ -38,6 +46,7 @@ import type {
   MuscleGroupId,
 } from '../domain/types';
 import { useDebouncedValue } from '../state/hooks';
+import { getSyncInfo } from '../sync/engine';
 import { useTrainer } from '../state/store';
 import { themeSettingOf } from '../state/theme';
 
@@ -125,6 +134,15 @@ export function SettingsView() {
   const [pendingDelete, setPendingDelete] = useState<Exercise | null>(null);
   const [pendingImport, setPendingImport] = useState<BackupFile | null>(null);
   const [resetting, setResetting] = useState(false);
+  const [manualOpen, setManualOpen] = useState(false);
+  const [heightDraft, setHeightDraft] = useState(
+    settings.heightCm === null ? '' : String(settings.heightCm),
+  );
+  const [bodyWeightDraft, setBodyWeightDraft] = useState(
+    settings.bodyWeightKg === null
+      ? ''
+      : formatWeightInput(settings.bodyWeightKg, settings.weightUnit),
+  );
   const [persistence, setPersistence] = useState<
     'checking' | 'unsupported' | 'persistent' | 'best-effort'
   >('checking');
@@ -146,6 +164,18 @@ export function SettingsView() {
       cancelled = true;
     };
   }, [customExercises]);
+
+  useEffect(() => {
+    setHeightDraft(settings.heightCm === null ? '' : String(settings.heightCm));
+  }, [settings.heightCm]);
+
+  useEffect(() => {
+    setBodyWeightDraft(
+      settings.bodyWeightKg === null
+        ? ''
+        : formatWeightInput(settings.bodyWeightKg, settings.weightUnit),
+    );
+  }, [settings.bodyWeightKg, settings.weightUnit]);
 
   useEffect(() => {
     let cancelled = false;
@@ -204,8 +234,11 @@ export function SettingsView() {
     }
   }
 
-  function handleExport() {
+  async function handleExport() {
     try {
+      if (await getSyncInfo()) {
+        throw new Error('Disconnect sync before exporting a backup.');
+      }
       downloadBackup(buildBackup());
       setNotice({ kind: 'ok', text: 'Backup downloaded.' });
     } catch (error) {
@@ -216,6 +249,9 @@ export function SettingsView() {
   async function handleImport(file: File | undefined) {
     if (!file) return;
     try {
+      if (await getSyncInfo()) {
+        throw new Error('Disconnect sync before importing a backup.');
+      }
       const backup = await readBackupFile(file);
       setPendingImport(backup);
     } catch (error) {
@@ -257,6 +293,30 @@ export function SettingsView() {
     }
   }
 
+  function saveHeight() {
+    const value = heightDraft.trim();
+    const next = value === '' ? null : Number(value);
+    if (next !== null && (!Number.isFinite(next) || next < 50 || next > 250)) {
+      setNotice({ kind: 'error', text: 'Height must be between 50 and 250 cm.' });
+      return;
+    }
+    void updateSettings({ heightCm: next }).catch((error) =>
+      setNotice({ kind: 'error', text: errorMessage(error) }),
+    );
+  }
+
+  function saveBodyWeight() {
+    const value = bodyWeightDraft.trim();
+    const display = value === '' ? null : Number(value);
+    if (display !== null && (!Number.isFinite(display) || display <= 0)) {
+      setNotice({ kind: 'error', text: 'Body weight must be greater than zero.' });
+      return;
+    }
+    void updateSettings({
+      bodyWeightKg: display === null ? null : Math.round(weightToKg(display, settings.weightUnit) * 10) / 10,
+    }).catch((error) => setNotice({ kind: 'error', text: errorMessage(error) }));
+  }
+
   return (
     <div className="view">
       <header className="view__header view__header--hero">
@@ -277,7 +337,6 @@ export function SettingsView() {
             <h2 className="card__title" id="settings-appearance">
               Appearance
             </h2>
-            <p className="card__hint">Choose the surface that suits the room.</p>
           </div>
         </div>
 
@@ -310,7 +369,28 @@ export function SettingsView() {
             <h2 className="card__title" id="settings-training">
               Training
             </h2>
-            <p className="card__hint">Feedback while you log sets.</p>
+          </div>
+        </div>
+
+        <div className="settings-inline-row">
+          <span className="settings-inline-row__label">Weight unit</span>
+          <div className="segmented" role="group" aria-label="Weight unit">
+            <button
+              type="button"
+              className={`segmented__item${settings.weightUnit === 'kg' ? ' segmented__item--active' : ''}`}
+              aria-pressed={settings.weightUnit === 'kg'}
+              onClick={() => void updateSettings({ weightUnit: 'kg' })}
+            >
+              kg
+            </button>
+            <button
+              type="button"
+              className={`segmented__item${settings.weightUnit === 'lb' ? ' segmented__item--active' : ''}`}
+              aria-pressed={settings.weightUnit === 'lb'}
+              onClick={() => void updateSettings({ weightUnit: 'lb' })}
+            >
+              lb
+            </button>
           </div>
         </div>
 
@@ -328,6 +408,54 @@ export function SettingsView() {
             onChange={(checked) => void updateSettings({ hapticsEnabled: checked })}
           />
         </div>
+      </section>
+
+      <section className="card settings-card" aria-labelledby="settings-body">
+        <div className="settings-card__head">
+          <span className="settings-card__icon">
+            <FiUser aria-hidden="true" />
+          </span>
+          <div>
+            <h2 className="card__title" id="settings-body">
+              Body
+            </h2>
+          </div>
+        </div>
+
+        <div className="body-metrics">
+          <label className="field">
+            <span className="field__label">Height (cm)</span>
+            <input
+              className="input input--num"
+              type="number"
+              inputMode="decimal"
+              min={50}
+              max={250}
+              value={heightDraft}
+              placeholder="180"
+              onChange={(event) => setHeightDraft(event.target.value)}
+              onBlur={saveHeight}
+            />
+          </label>
+          <label className="field">
+            <span className="field__label">Body weight ({settings.weightUnit})</span>
+            <input
+              className="input input--num"
+              type="number"
+              inputMode="decimal"
+              min={0}
+              value={bodyWeightDraft}
+              placeholder={settings.weightUnit === 'kg' ? '80' : '176'}
+              onChange={(event) => setBodyWeightDraft(event.target.value)}
+              onBlur={saveBodyWeight}
+            />
+          </label>
+        </div>
+        <p className="card__hint">
+          {settings.bodyWeightKg !== null
+            ? formatBodyWeight(settings.bodyWeightKg, settings.weightUnit)
+            : 'Add your weight to track BMI and progress.'}
+        </p>
       </section>
 
       <section className="card settings-card" aria-labelledby="settings-exercises">
@@ -478,6 +606,8 @@ export function SettingsView() {
         )}
       </section>
 
+      <SyncSettings />
+
       <section className="card settings-card" aria-labelledby="settings-data">
         <div className="settings-card__head">
           <span className="settings-card__icon">
@@ -511,7 +641,7 @@ export function SettingsView() {
         </dl>
 
         <div className="settings-actions">
-          <button type="button" className="button" onClick={handleExport}>
+          <button type="button" className="button" onClick={() => void handleExport()}>
             <FiDownload aria-hidden="true" /> Export backup
           </button>
           <button type="button" className="button" onClick={() => importRef.current?.click()}>
@@ -562,16 +692,35 @@ export function SettingsView() {
         </div>
       </section>
 
+      <section className="card settings-card" aria-labelledby="settings-manual">
+        <div className="settings-card__head">
+          <span className="settings-card__icon">
+            <FiBookOpen aria-hidden="true" />
+          </span>
+          <div>
+            <h2 className="card__title" id="settings-manual">
+              Manual
+            </h2>
+            <p className="card__hint">Everything Trainer can do, in one place.</p>
+          </div>
+        </div>
+
+        <div className="settings-actions">
+          <button type="button" className="button" onClick={() => setManualOpen(true)}>
+            <FiBookOpen aria-hidden="true" /> Open manual
+          </button>
+        </div>
+      </section>
+
       <section className="card settings-card" aria-labelledby="settings-about">
-        <div className="settings-about">
-          <span className="settings-about__mark">
-            <BrandMark />
+        <div className="settings-card__head">
+          <span className="settings-card__icon">
+            <FiInfo aria-hidden="true" />
           </span>
           <div>
             <h2 className="card__title" id="settings-about">
-              About Trainer
+              About
             </h2>
-            <p className="card__hint">A local-first routine builder and workout logger.</p>
           </div>
         </div>
 
@@ -585,56 +734,38 @@ export function SettingsView() {
             <dd>This browser (IndexedDB)</dd>
           </div>
           <div>
-            <dt>Account</dt>
-            <dd>Not required</dd>
+            <dt>Exercise catalogue</dt>
+            <dd>wger — CC BY-SA 4.0, CC BY-SA 3.0 and CC0</dd>
           </div>
           <div>
-            <dt>Offline</dt>
-            <dd>Installable PWA; the shell and last loaded catalogue work offline.</dd>
+            <dt>Exercise media</dt>
+            <dd>wger — CC BY-SA 4.0 / 3.0 / CC0; credits shown with each image</dd>
+          </div>
+          <div>
+            <dt>Body diagram</dt>
+            <dd>@mjcdev/react-body-highlighter — MIT</dd>
           </div>
         </dl>
 
         <p className="settings-note">
-          <FiInfo aria-hidden="true" /> Trainer has no in-app AI and no reminder engine. Sound and
-          haptics are used only while logging sets in a later stage.
+          Exercise text, metadata and images come from{' '}
+          <a href="https://wger.de" target="_blank" rel="noreferrer">
+            wger
+          </a>
+          . Trainer maps names into its own taxonomy, strips HTML and bundles no videos. See{' '}
+          <code>ATTRIBUTION.md</code> in the source repository for authors and license details.
         </p>
 
-        <div className="catalogue-attribution">
-          <h3 className="settings-subhead__title">Exercise catalogue</h3>
+        {import.meta.env.DEV && (
           <p className="settings-note">
-            Exercise text and metadata come from{' '}
-            <a href="https://wger.de" target="_blank" rel="noreferrer">
-              wger
-            </a>{' '}
-            under{' '}
-            <a
-              href="https://creativecommons.org/licenses/by-sa/4.0/deed.en"
-              target="_blank"
-              rel="noreferrer"
-            >
-              CC BY-SA 4.0
-            </a>
-            ,{' '}
-            <a
-              href="https://creativecommons.org/licenses/by-sa/3.0/deed.en"
-              target="_blank"
-              rel="noreferrer"
-            >
-              CC BY-SA 3.0
-            </a>{' '}
-            and{' '}
-            <a
-              href="https://creativecommons.org/publicdomain/zero/1.0/"
-              target="_blank"
-              rel="noreferrer"
-            >
-              CC0
-            </a>{' '}
-            terms. Trainer maps names into its own taxonomy, strips HTML and bundles no images. See{' '}
-            <code>ATTRIBUTION.md</code> in the source repository for authors and license details.
+            <a href="?dev=1">Open developer preview</a>
           </p>
-        </div>
+        )}
       </section>
+
+      <BottomSheet open={manualOpen} title="User manual" onClose={() => setManualOpen(false)}>
+        <UserManual />
+      </BottomSheet>
 
       <BottomSheet
         open={editorFor !== null}

@@ -9,6 +9,8 @@ const BUILD_ID = '__BUILD_ID__';
 const CACHE_PREFIX = 'trainer-';
 const SHELL_CACHE = `${CACHE_PREFIX}shell-${BUILD_ID}`;
 const RUNTIME_CACHE = `${CACHE_PREFIX}runtime-${BUILD_ID}`;
+const MEDIA_CACHE = 'trainer-media-v1';
+const MEDIA_MANIFEST = '/exercise-media-manifest.json';
 
 /** Core files that make the app bootable offline. */
 const SHELL_ASSETS = [
@@ -24,6 +26,43 @@ const SHELL_ASSETS = [
  * hashes asset filenames, so this is the only reliable way to precache the
  * JavaScript and CSS of the current build on a first visit.
  */
+/**
+ * Fills the stable media cache from the generated manifest. Content-hashed
+ * files are immutable, so this only downloads files the cache is missing.
+ */
+async function precacheMedia() {
+  try {
+    const response = await fetch(MEDIA_MANIFEST, { cache: 'no-store' });
+    if (!response.ok) return;
+    const manifest = await response.json();
+    if (!Array.isArray(manifest?.files)) return;
+
+    const cache = await caches.open(MEDIA_CACHE);
+    const cached = await cache.keys();
+    const cachedPaths = new Set(cached.map((request) => new URL(request.url).pathname));
+    const wanted = new Set(manifest.files);
+    const missing = manifest.files.filter((path) => !cachedPaths.has(path));
+
+    for (let index = 0; index < missing.length; index += 8) {
+      const batch = missing.slice(index, index + 8);
+      await Promise.allSettled(
+        batch.map(async (path) => {
+          const asset = await fetch(path);
+          if (asset.ok) await cache.put(path, asset);
+        }),
+      );
+    }
+
+    await Promise.all(
+      cached
+        .filter((request) => !wanted.has(new URL(request.url).pathname))
+        .map((request) => cache.delete(request)),
+    );
+  } catch {
+    // Offline — the next launch retries.
+  }
+}
+
 async function precacheBuildAssets() {
   try {
     const response = await fetch('/index.html', { cache: 'no-store' });
@@ -70,14 +109,20 @@ self.addEventListener('activate', (event) => {
             (key) =>
               key !== SHELL_CACHE &&
               key !== RUNTIME_CACHE &&
+              key !== MEDIA_CACHE &&
               (key.startsWith(CACHE_PREFIX) || key.startsWith('tasker-')),
           )
           .map((key) => caches.delete(key)),
       );
       await precacheBuildAssets();
       await self.clients.claim();
+      await precacheMedia();
     })(),
   );
+});
+
+self.addEventListener('message', (event) => {
+  if (event.data?.type === 'cache-media') event.waitUntil(precacheMedia());
 });
 
 self.addEventListener('fetch', (event) => {
@@ -102,6 +147,24 @@ self.addEventListener('fetch', (event) => {
             (await caches.match('/', { ignoreVary: true })) ??
             Response.error(),
         ),
+    );
+    return;
+  }
+
+  // Exercise media lives in a stable cache that survives app builds.
+  if (url.pathname.startsWith('/exercise-media/')) {
+    event.respondWith(
+      caches.open(MEDIA_CACHE).then(async (cache) => {
+        const cached = await cache.match(request, { ignoreVary: true });
+        if (cached) return cached;
+        try {
+          const response = await fetch(request);
+          if (response.ok) await cache.put(request, response.clone());
+          return response;
+        } catch {
+          return Response.error();
+        }
+      }),
     );
     return;
   }

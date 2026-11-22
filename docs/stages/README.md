@@ -1,6 +1,6 @@
 # Trainer — staged implementation plan
 
-Status: **planning only**. No product code has been changed for Trainer yet.
+Status: **implemented**. Stages 1–8 are complete; the per-stage checklists are the acceptance tests.
 
 This folder is the working plan for turning the existing Tasker todo app into **Trainer**, a
 local-first routine builder and workout logger driven by an external AI workflow (n8n).

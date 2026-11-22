@@ -7,8 +7,11 @@ import {
 } from '../domain/catalogue/groups';
 import { fromIsoDate } from '../domain/date';
 import type { LastPerformance } from '../domain/session';
-import type { Exercise, SessionExercise, SetLog } from '../domain/types';
+import type { Exercise, SessionExercise, SetLog, WeightUnit } from '../domain/types';
+import { formatWeight } from '../domain/units';
 import { useLastPerformance } from '../state/hooks';
+import { useTrainer } from '../state/store';
+import { ExerciseThumb } from './ExerciseMedia';
 import { SetLogger } from './SetLogger';
 
 interface SessionExerciseCardProps {
@@ -30,16 +33,14 @@ interface SessionExerciseCardProps {
   onUpdateSet: (setId: string, patch: Partial<SetLog>) => Promise<void>;
   onRequestRemoveSet: (set: SetLog) => void;
   onSavingChange: (delta: number) => void;
+  onOpenDetails?: (exercise: Exercise) => void;
+  showLogger?: boolean;
 }
 
-function formatWeight(value: number): string {
-  return Number.isInteger(value) ? String(value) : String(Math.round(value * 100) / 100);
-}
-
-function lastLine(performance: LastPerformance | null): string {
+function lastLine(performance: LastPerformance | null, unit: WeightUnit): string {
   if (!performance) return 'First time';
   return performance.sets
-    .map((set) => `${formatWeight(set.weight)}×${set.reps}`)
+    .map((set) => `${formatWeight(set.weight, unit)} ${unit} × ${set.reps}`)
     .join(', ');
 }
 
@@ -57,7 +58,10 @@ export function SessionExerciseCard({
   onUpdateSet,
   onRequestRemoveSet,
   onSavingChange,
+  onOpenDetails,
+  showLogger = true,
 }: SessionExerciseCardProps) {
+  const { settings } = useTrainer();
   const performance = useLastPerformance(row.exerciseId);
   const [sets, setSets] = useState(String(row.targetSets));
   const [min, setMin] = useState(String(row.targetRepMin));
@@ -106,9 +110,32 @@ export function SessionExerciseCard({
   return (
     <article className="exercise-card card" aria-labelledby={`exercise-${row.id}`}>
       <header className="exercise-card__head">
-        <div>
+        <div className="exercise-card__identity">
+          {exercise ? (
+            <button
+              type="button"
+              className="exercise-card__thumb-button"
+              aria-label={`Open ${row.name} details`}
+              aria-haspopup="dialog"
+              onClick={() => onOpenDetails?.(exercise)}
+            >
+              <ExerciseThumb exercise={exercise} animated />
+            </button>
+          ) : null}
+          <div>
           <h3 className="exercise-card__title" id={`exercise-${row.id}`}>
-            {row.name}
+            {exercise ? (
+              <button
+                type="button"
+                className="exercise-card__open"
+                aria-haspopup="dialog"
+                onClick={() => onOpenDetails?.(exercise)}
+              >
+                {row.name}
+              </button>
+            ) : (
+              row.name
+            )}
           </h3>
           <div className="exercise-card__meta">
             {category ? (
@@ -124,6 +151,7 @@ export function SessionExerciseCard({
                 {MUSCLE_GROUP_LABELS[muscle]}
               </span>
             ))}
+          </div>
           </div>
         </div>
         {editMode && editable ? (
@@ -219,7 +247,7 @@ export function SessionExerciseCard({
             {row.note ? <span> · {row.note}</span> : null}
           </p>
           <p className="exercise-card__last">
-            Last: {lastLine(performance)}
+            Last: {lastLine(performance, settings.weightUnit)}
             {performance ? (
               <span className="exercise-card__last-date">
                 {' '}
@@ -238,17 +266,19 @@ export function SessionExerciseCard({
         </p>
       ) : null}
 
-      <SetLogger
-        row={row}
-        editable={editable}
-        onLogSet={onLogSet}
-        onUpdateSet={onUpdateSet}
-        onRemoveSet={(setId) => {
-          const set = row.sets.find((item) => item.id === setId);
-          if (set) onRequestRemoveSet(set);
-        }}
-        onSavingChange={onSavingChange}
-      />
+      {showLogger ? (
+        <SetLogger
+          row={row}
+          editable={editable}
+          onLogSet={onLogSet}
+          onUpdateSet={onUpdateSet}
+          onRemoveSet={(setId) => {
+            const set = row.sets.find((item) => item.id === setId);
+            if (set) onRequestRemoveSet(set);
+          }}
+          onSavingChange={onSavingChange}
+        />
+      ) : null}
     </article>
   );
 }

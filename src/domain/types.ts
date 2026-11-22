@@ -50,6 +50,18 @@ export type ExerciseCategory =
   | 'abs'
   | 'full-body';
 
+export interface ExerciseMedia {
+  id: string;
+  thumb: string;
+  src: string;
+  animated: boolean;
+  alt: string;
+  license: string;
+  licenseUrl: string;
+  author: string;
+  sourceUrl: string;
+}
+
 export interface Exercise {
   /** `wger:<id>` for seeded rows, UUID for custom rows. Stable forever. */
   id: string;
@@ -60,6 +72,8 @@ export interface Exercise {
   secondaryMuscles: MuscleGroupId[];
   equipment: EquipmentId[];
   instructions: string;
+  /** Seeded catalogue only. */
+  media?: ExerciseMedia[];
   source: 'wger' | 'custom';
   createdAt: IsoDateTime | null; // custom only
 }
@@ -135,6 +149,8 @@ export interface Session {
   source: SessionSource;
   exercises: SessionExercise[];
   notes: string;
+  /** How the session left the user feeling: 1 drained … 5 fresh. */
+  rating: number | null;
   createdAt: IsoDateTime;
   updatedAt: IsoDateTime;
   completedAt: IsoDateTime | null;
@@ -143,11 +159,16 @@ export interface Session {
 
 export type ThemeSetting = 'nordic-light' | 'nordic-dark';
 
+export type WeightUnit = 'kg' | 'lb';
+
 export interface Settings {
   theme: ThemeSetting;
   soundEnabled: boolean;
   hapticsEnabled: boolean;
   timezone: string; // IANA, used for display and "today"
+  weightUnit: WeightUnit;
+  heightCm: number | null;
+  bodyWeightKg: number | null;
 }
 
 export interface CustomExerciseInput {

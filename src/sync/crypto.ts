@@ -7,6 +7,7 @@
 
 const encoder = new TextEncoder();
 const ITERATIONS = 600_000;
+// Frozen wire-format salt: changing it would orphan every existing sync space.
 const SALT = encoder.encode('tasker-sync-v1');
 
 export interface SyncKeys {

@@ -16,19 +16,21 @@ export function WeekStrip({ today, routine, sessions, onSelectDate }: WeekStripP
   const weekdayFormat = new Intl.DateTimeFormat(undefined, { weekday: 'narrow' });
 
   return (
-    <section className="week-strip card" aria-label="This week">
-      {Array.from({ length: 7 }, (_, index) => addDays(monday, index)).map((date) => {
+    <section className="week-strip card" aria-label="Next 14 days">
+      {Array.from({ length: 14 }, (_, index) => addDays(monday, index)).map((date) => {
         const session = byDate.get(date);
         const slot = routine ? resolveSlot(routine, date) : null;
         const isRest = slot?.kind === 'rest';
         const isToday = date === today;
-        const clickable = Boolean(session && date < today);
+        const isFutureWorkout = slot?.kind === 'workout' && date > today;
+        const clickable = Boolean(session && date < today) || isFutureWorkout;
         const dateValue = fromIsoDate(date);
 
         let status = '';
         if (session?.status === 'completed') status = 'completed';
         else if (session?.status === 'skipped') status = 'skipped';
         else if (session) status = 'session';
+        else if (slot?.kind === 'workout') status = 'workout';
         else if (isRest) status = 'rest';
 
         const label = [
@@ -63,7 +65,7 @@ export function WeekStrip({ today, routine, sessions, onSelectDate }: WeekStripP
                 <FiSlash aria-hidden="true" />
               ) : status === 'rest' ? (
                 <span className="week-strip__rest" aria-hidden="true" />
-              ) : status === 'session' ? (
+              ) : status === 'session' || status === 'workout' ? (
                 <span className="week-strip__dot" aria-hidden="true" />
               ) : null}
             </span>

@@ -4,20 +4,20 @@
  * A model authenticates with the same sync passphrase used on other devices.
  * The passphrase is stretched exactly like the client does; the resulting
  * authentication key must match an existing sync space. The derived encryption
- * key is then used to read and write the encrypted change log over MCP.
+ * key is then used to read the encrypted change log over MCP.
  */
 
 import type { NextFunction, Request, Response } from 'express';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { findUser, type UserRow } from '../db.js';
-import { authKeyHash, keysFor, type SyncKeys } from './crypto.js';
-import { registerTaskerTools } from './tools.js';
+import { authKeyHash, keysFor, type SyncKeys } from '../space/crypto.js';
+import { registerTrainerTools } from './tools.js';
 
 export const MCP_ENABLED = process.env.MCP_ENABLED !== 'false' && process.env.MCP_ENABLED !== '0';
 
 interface McpRequest extends Request {
-  taskerMcp?: { user: UserRow; keys: SyncKeys };
+  trainerMcp?: { user: UserRow; keys: SyncKeys };
 }
 
 const buckets = new Map<string, { count: number; resetAt: number }>();
@@ -38,7 +38,7 @@ async function authenticate(req: Request, res: Response, next: NextFunction): Pr
   // header exists because some passphrases contain characters a bearer parser
   // may disagree with.
   const header = req.headers.authorization ?? '';
-  const custom = req.headers['x-tasker-passphrase'];
+  const custom = req.headers['x-trainer-passphrase'];
   const passphrase =
     (header.startsWith('Bearer ') ? header.slice(7).trim() : '') ||
     (Array.isArray(custom) ? custom[0] : custom ?? '').trim();
@@ -66,7 +66,7 @@ async function authenticate(req: Request, res: Response, next: NextFunction): Pr
       res.status(429).json({ error: 'slow_down' });
       return;
     }
-    (req as McpRequest).taskerMcp = { user, keys };
+    (req as McpRequest).trainerMcp = { user, keys };
     next();
   } catch {
     res.status(500).json({ error: 'key_derivation_failed' });
@@ -81,14 +81,20 @@ export function mcpAuth(req: Request, res: Response, next: NextFunction): void {
 }
 
 export async function handleMcp(req: Request, res: Response): Promise<void> {
-  const auth = (req as McpRequest).taskerMcp;
+  const auth = (req as McpRequest).trainerMcp;
   if (!auth) {
     res.status(401).json({ error: 'unauthorized' });
     return;
   }
 
-  const server = new McpServer({ name: 'tasker', version: '1.0.0' });
-  registerTaskerTools(server, auth);
+  const server = new McpServer(
+    { name: 'trainer', version: '1.0.0' },
+    {
+      instructions:
+        'Trainer is a personal routine and workout log. A routine is a repeating cycle of weeks where each weekday slot is a workout focus or rest; the routine slot does not list exercises. A session is one training day: it snapshots the routine name, focus and exercises, and holds target sets/reps plus logged weight and reps. All tools are read-only.',
+    },
+  );
+  registerTrainerTools(server, auth);
 
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: undefined,

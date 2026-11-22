@@ -5,6 +5,7 @@ import { normalizeExerciseText } from '../domain/catalogue/wger';
 import { addDays, fromIsoDate } from '../domain/date';
 import { sessionSummaries } from '../domain/metrics';
 import type { Session, SessionStatus } from '../domain/types';
+import { formatVolume } from '../domain/units';
 import { useDebouncedValue, useMediaQuery } from '../state/hooks';
 import { useTrainer } from '../state/store';
 
@@ -26,10 +27,6 @@ const DATE_FORMAT = new Intl.DateTimeFormat(undefined, {
   weekday: 'short',
   day: 'numeric',
   month: 'short',
-});
-const compactFormat = new Intl.NumberFormat(undefined, {
-  notation: 'compact',
-  maximumFractionDigits: 1,
 });
 
 function monthKey(value: string): string {
@@ -58,7 +55,7 @@ export function HistoryView({
   onSelectSession,
   onOpenToday,
 }: HistoryViewProps) {
-  const { sessions } = useTrainer();
+  const { sessions, settings } = useTrainer();
   const [status, setStatus] = useState<StatusFilter>('all');
   const [focus, setFocus] = useState('');
   const [exerciseQuery, setExerciseQuery] = useState('');
@@ -267,17 +264,26 @@ export function HistoryView({
                                 ) : (
                                   <>
                                     <span>
-                                      {summary?.sets ?? 0} sets · {summary?.exercises ?? 0}{' '}
-                                      exercises
+                                      {summary?.sets ?? 0}{' '}
+                                      {(summary?.sets ?? 0) === 1 ? 'set' : 'sets'} ·{' '}
+                                      {summary?.exercises ?? 0}{' '}
+                                      {(summary?.exercises ?? 0) === 1
+                                        ? 'exercise'
+                                        : 'exercises'}
                                     </span>
                                     <span>
-                                      {compactFormat.format(summary?.volume ?? 0)} kg
+                                      {formatVolume(summary?.volume ?? 0, settings.weightUnit)}{' '}
+                                      {settings.weightUnit}
                                     </span>
                                   </>
                                 )}
                               </span>
                               <span className={`badge badge--${session.status}`}>
-                                {session.status === 'completed' ? 'Completed' : 'Skipped'}
+                                {session.status === 'completed'
+                                  ? 'Completed'
+                                  : session.status === 'planned'
+                                    ? 'Planned'
+                                    : 'Skipped'}
                               </span>
                             </button>
                           </li>

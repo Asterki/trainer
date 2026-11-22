@@ -43,6 +43,7 @@ export function createSessionForSlot(
     source,
     exercises: [],
     notes: '',
+    rating: null,
     createdAt: timestamp,
     updatedAt: timestamp,
     completedAt: null,
@@ -111,6 +112,14 @@ export function deriveSessionStatus(session: Session): DerivedSessionStatus {
 
 export function isSessionEditable(session: Session, today: IsoDate = todayIso()): boolean {
   return session.date === today && session.status !== 'skipped';
+}
+
+/** Future planned sessions accept exercise planning, but never set logging. */
+export function isSessionPlanEditable(
+  session: Session,
+  today: IsoDate = todayIso(),
+): boolean {
+  return session.date >= today && session.status === 'planned';
 }
 
 export function sessionSetCount(session: Session): number {

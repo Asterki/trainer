@@ -62,6 +62,48 @@ export interface SessionSummary {
   exercises: number;
 }
 
+export interface TrainingStreak {
+  current: number;
+  best: number;
+}
+
+export const FEELINGS = ['Drained', 'Tired', 'OK', 'Strong', 'Fresh'] as const;
+
+/** Human label for the 1–5 session feel rating. */
+export function sessionFeeling(rating: number | null): string | null {
+  if (rating === null) return null;
+  return FEELINGS[rating - 1] ?? null;
+}
+
+/**
+ * Consecutive completed scheduled workouts. A skipped scheduled workout breaks
+ * the run; rest days and ad-hoc sessions are not scheduled workouts so they do
+ * not participate.
+ */
+export function trainingStreak(sessions: Session[], today: IsoDate): TrainingStreak {
+  const scheduled = sessions
+    .filter(
+      (session) =>
+        session.source !== 'manual' &&
+        session.date <= today &&
+        (session.status === 'completed' || session.status === 'skipped'),
+    )
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  let best = 0;
+  let run = 0;
+  for (const session of scheduled) {
+    if (session.status === 'completed') {
+      run += 1;
+      best = Math.max(best, run);
+    } else {
+      run = 0;
+    }
+  }
+
+  return { current: run, best };
+}
+
 function completedAscending(sessions: Session[]): Session[] {
   return sessions
     .filter((session) => session.status === 'completed')

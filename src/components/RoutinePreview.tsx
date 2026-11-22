@@ -34,13 +34,13 @@ export function RoutinePreview({ routine }: { routine: Routine }) {
           <h2 className="routine-preview__title" id="routine-preview-title">
             Next 14 days
           </h2>
-          <p className="routine-preview__hint">
-            {!validStart
-              ? 'Choose a valid start date to see the cycle.'
-              : startsInFuture
-                ? `This routine starts ${startFormat.format(fromIsoDate(routine.startDate))}; the preview begins there.`
-                : 'What the cycle resolves to from today. Saved sessions are never rewritten.'}
-          </p>
+          {!validStart || startsInFuture ? (
+            <p className="routine-preview__hint">
+              {!validStart
+                ? 'Choose a valid start date to see the cycle.'
+                : `This routine starts ${startFormat.format(fromIsoDate(routine.startDate))}; the preview begins there.`}
+            </p>
+          ) : null}
         </div>
       </div>
 

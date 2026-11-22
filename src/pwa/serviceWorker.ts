@@ -9,7 +9,11 @@
 export async function registerServiceWorker(): Promise<ServiceWorkerRegistration | null> {
   if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return null;
   try {
-    return await navigator.serviceWorker.register('/sw.js', { scope: '/' });
+    const registration = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
+    void navigator.serviceWorker.ready.then((ready) => {
+      ready.active?.postMessage({ type: 'cache-media' });
+    });
+    return registration;
   } catch {
     return null;
   }

@@ -16,18 +16,17 @@ import {
 } from 'react-icons/fi';
 import type { IconType } from 'react-icons';
 import { BottomSheet } from './components/BottomSheet';
-import { BrandMark } from './components/BrandMark';
-import { ConfirmDialog } from './components/ConfirmDialog';
 import { Sidebar } from './components/Sidebar';
 import { TopBar } from './components/TopBar';
 import { millisecondsUntilMidnight, todayIso } from './domain/date';
 import { useActiveRoutine, useMediaQuery } from './state/hooks';
 import { INITIAL_NAV, type NavState, type ViewKey } from './state/navigation';
 import { useTrainer } from './state/store';
-import { applyTheme, colorSchemeOf, themeSettingOf } from './state/theme';
+import { applyTheme, colorSchemeOf } from './state/theme';
 import { HistoryView } from './views/HistoryView';
 import { ProgressView } from './views/ProgressView';
 import { RoutineView } from './views/RoutineView';
+import { DevPreviewView } from './views/DevPreviewView';
 import { SettingsView } from './views/SettingsView';
 import { TodayView } from './views/TodayView';
 
@@ -57,7 +56,6 @@ export function App() {
   const {
     ready,
     settings,
-    updateSettings,
     ensureSessions,
     error,
     clearError,
@@ -66,8 +64,9 @@ export function App() {
   const [today, setToday] = useState(todayIso);
   const [nav, setNav] = useState<NavState>(INITIAL_NAV);
   const [moreOpen, setMoreOpen] = useState(false);
-  const [routineDirty, setRoutineDirty] = useState(false);
-  const [pendingView, setPendingView] = useState<ViewKey | null>(null);
+  const [devPreview, setDevPreview] = useState(
+    () => import.meta.env.DEV && new URLSearchParams(window.location.search).has('dev'),
+  );
 
   const theme = colorSchemeOf(settings.theme);
 
@@ -133,18 +132,10 @@ export function App() {
         setMoreOpen(false);
         return;
       }
-      if (nav.view === 'routine' && routineDirty) {
-        setPendingView(view);
-        return;
-      }
       applyNavigate(view);
     },
-    [applyNavigate, nav.view, routineDirty],
+    [applyNavigate, nav.view],
   );
-
-  const toggleTheme = useCallback(() => {
-    void updateSettings({ theme: themeSettingOf(theme === 'dark' ? 'light' : 'dark') });
-  }, [theme, updateSettings]);
 
   // ── Keyboard shortcuts ────────────────────────────────────────────────────
   useEffect(() => {
@@ -173,7 +164,28 @@ export function App() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [moreOpen, navigate]);
 
+  const leavePreview = useCallback(
+    (view?: ViewKey) => {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('dev');
+      window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+      setDevPreview(false);
+      if (view) applyNavigate(view);
+    },
+    [applyNavigate],
+  );
+
   const moreActive = nav.view === 'history' || nav.view === 'settings';
+
+  if (devPreview) {
+    return (
+      <div className="app app--desktop">
+        <main className="workspace" id="main" tabIndex={-1}>
+          <DevPreviewView onExit={() => leavePreview()} onNavigate={leavePreview} />
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className={`app${isMobile ? ' app--mobile' : ' app--desktop'}`}>
@@ -181,7 +193,7 @@ export function App() {
         Skip to content
       </a>
 
-      <TopBar theme={theme} onToggleTheme={toggleTheme} />
+      <TopBar />
 
       <div className="app__body">
         {!isMobile && <Sidebar nav={nav} onNavigate={navigate} />}
@@ -209,7 +221,7 @@ export function App() {
                   onViewHistory={() => navigate('history')}
                 />
               )}
-              {nav.view === 'routine' && <RoutineView onDirtyChange={setRoutineDirty} />}
+              {nav.view === 'routine' && <RoutineView />}
               {nav.view === 'progress' && (
                 <ProgressView
                   today={today}
@@ -262,22 +274,6 @@ export function App() {
         </nav>
       )}
 
-      <ConfirmDialog
-        open={pendingView !== null}
-        title="Discard changes?"
-        confirmLabel="Discard changes"
-        tone="danger"
-        onCancel={() => setPendingView(null)}
-        onConfirm={() => {
-          const destination = pendingView;
-          setPendingView(null);
-          setRoutineDirty(false);
-          if (destination) applyNavigate(destination);
-        }}
-      >
-        <p>The routine editor has unsaved changes. Leave and discard them?</p>
-      </ConfirmDialog>
-
       {isMobile && (
         <BottomSheet open={moreOpen} title="More" onClose={() => setMoreOpen(false)}>
           <nav className="sheet-menu" aria-label="More views">
@@ -300,20 +296,6 @@ export function App() {
               );
             })}
           </nav>
-
-          <section className="sheet-about" aria-labelledby="sheet-about-title">
-            <span className="sheet-about__mark">
-              <BrandMark />
-            </span>
-            <div>
-              <h2 className="sheet-about__title" id="sheet-about-title">
-                Trainer <span className="badge badge--quiet">v{__APP_VERSION__}</span>
-              </h2>
-              <p className="sheet-about__body">
-                A local-first routine builder and workout logger. No account, no cloud required.
-              </p>
-            </div>
-          </section>
         </BottomSheet>
       )}
     </div>

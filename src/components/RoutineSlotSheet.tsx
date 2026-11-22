@@ -123,7 +123,7 @@ export function RoutineSlotSheet({ open, slot, onClose, onSave }: RoutineSlotShe
               autoFocus
             />
             <span className="field__hint">
-              The AI chooses exercises for this focus. Free text is allowed.
+              Exercises are planned for this focus. Free text is allowed.
             </span>
             <div className="focus-chips" aria-label="Focus suggestions">
               {FOCUS_SUGGESTIONS.map((suggestion) => (

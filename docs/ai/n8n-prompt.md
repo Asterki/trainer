@@ -101,10 +101,10 @@ Recent Push sessions:
   2026-11-09 completed: Bench Press 80x8, 80x7; Incline DB Press 30x10, 30x9
   2026-11-02 completed: Bench Press 77.5x8, 77.5x8; Overhead Press 45x8
 Exercise stats:
-  Bench Press (wger:192): last 2026-11-09 80x8; PRs 5:95 8:80; trend 1200, 1350, 1280
+  Bench Press (wger:73): last 2026-11-09 80x8; PRs 5:95 8:80; trend 1200, 1350, 1280
   ...
 Candidates (choose ids only from this list):
-  wger:192 Bench Press | primary: pectoralis-major | secondary: triceps-brachii, anterior-deltoid | barbell
+  wger:73 Bench Press | primary: pectoralis-major | secondary: triceps-brachii, anterior-deltoid | barbell
   wger:145 Incline Dumbbell Press | primary: pectoralis-major | secondary: triceps-brachii, anterior-deltoid | dumbbell
   ...
 Muscle volume (last 8 weeks):
@@ -129,7 +129,7 @@ Expected output shape:
   "notes": "Week 1 push, slightly reduced pressing volume.",
   "exercises": [
     {
-      "exerciseId": "wger:192",
+      "exerciseId": "wger:73",
       "targetSets": 4,
       "targetRepMin": 6,
       "targetRepMax": 8,
@@ -170,7 +170,7 @@ The plan is untrusted model output. This node must:
   "notes": "Week 1 push, slightly reduced pressing volume.",
   "exercises": [
     {
-      "exerciseId": "wger:192",
+      "exerciseId": "wger:73",
       "targetSets": 4,
       "targetRepMin": 6,
       "targetRepMax": 8,
@@ -289,7 +289,7 @@ Response (abridged to one recent session and one stat):
       "status": "completed",
       "exercises": [
         {
-          "exerciseId": "wger:192",
+          "exerciseId": "wger:73",
           "name": "Bench Press",
           "primaryMuscles": ["pectoralis-major"],
           "sets": [
@@ -304,7 +304,7 @@ Response (abridged to one recent session and one stat):
   ],
   "exerciseStats": [
     {
-      "exerciseId": "wger:192",
+      "exerciseId": "wger:73",
       "name": "Bench Press",
       "primaryMuscles": ["pectoralis-major"],
       "last": {
@@ -317,7 +317,7 @@ Response (abridged to one recent session and one stat):
   ],
   "candidates": [
     {
-      "exerciseId": "wger:192",
+      "exerciseId": "wger:73",
       "name": "Bench Press",
       "primaryMuscles": ["pectoralis-major"],
       "secondaryMuscles": ["triceps-brachii", "anterior-deltoid"],
@@ -366,7 +366,7 @@ Content-Type: application/json
   "notes": "Week 1 push, slightly reduced pressing volume.",
   "exercises": [
     {
-      "exerciseId": "wger:192",
+      "exerciseId": "wger:73",
       "targetSets": 4,
       "targetRepMin": 6,
       "targetRepMax": 8,
@@ -398,7 +398,7 @@ Response `200` (abridged to one exercise row):
   "exercises": [
     {
       "id": "2c7e6a1b-4f3d-4b9a-8e2c-1d5f7a9b0c3e",
-      "exerciseId": "wger:192",
+      "exerciseId": "wger:73",
       "name": "Bench Press",
       "primaryMuscles": ["pectoralis-major"],
       "secondaryMuscles": ["triceps-brachii", "anterior-deltoid"],

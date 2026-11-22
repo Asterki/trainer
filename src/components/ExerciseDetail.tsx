@@ -12,8 +12,11 @@ import {
   prsForExercise,
   type ExerciseSessionPoint,
 } from '../domain/metrics';
-import type { Exercise } from '../domain/types';
+import type { Exercise, WeightUnit } from '../domain/types';
+import { formatVolume, formatWeight } from '../domain/units';
 import { useTrainer } from '../state/store';
+import { ExerciseMediaGallery } from './ExerciseMedia';
+import { MuscleDiagram } from './MuscleDiagram';
 import { PrTable } from './PrTable';
 import { TrendChart } from './charts/TrendChart';
 
@@ -27,10 +30,6 @@ interface ExerciseDetailProps {
 type ChartMode = 'weight' | 'volume' | 'reps';
 
 const numberFormat = new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 });
-const compactFormat = new Intl.NumberFormat(undefined, {
-  notation: 'compact',
-  maximumFractionDigits: 1,
-});
 
 function formatDate(value: string): string {
   return new Intl.DateTimeFormat(undefined, {
@@ -46,8 +45,8 @@ function shortDate(value: string): string {
   );
 }
 
-function formatSetList(point: ExerciseSessionPoint): string {
-  return point.sets.map((set) => `${set.weight}×${set.reps}`).join(', ');
+function formatSetList(point: ExerciseSessionPoint, unit: WeightUnit): string {
+  return point.sets.map((set) => `${formatWeight(set.weight, unit)}×${set.reps}`).join(', ');
 }
 
 export function ExerciseDetail({
@@ -56,7 +55,8 @@ export function ExerciseDetail({
   onNavigateSettings,
   onClose,
 }: ExerciseDetailProps) {
-  const { sessions, customExercises } = useTrainer();
+  const { sessions, customExercises, settings } = useTrainer();
+  const unit = settings.weightUnit;
   const [catalogue, setCatalogue] = useState<Exercise[]>([]);
   const [mode, setMode] = useState<ChartMode>('weight');
   const [visible, setVisible] = useState(20);
@@ -131,21 +131,21 @@ export function ExerciseDetail({
       return {
         label,
         value: point.volume,
-        detail: `${numberFormat.format(point.volume)} kg volume · ${point.sets.length} sets`,
+        detail: `${formatVolume(point.volume, unit)} ${unit} volume · ${point.sets.length} sets`,
       };
     }
     if (effectiveMode === 'reps') {
       return {
         label,
         value: point.topRepsAtTop,
-        detail: `Top set ${point.topWeight > 0 ? `${point.topWeight} kg × ` : ''}${point.topRepsAtTop} reps`,
+        detail: `Top set ${point.topWeight > 0 ? `${formatWeight(point.topWeight, unit)} ${unit} × ` : ''}${point.topRepsAtTop} reps`,
       };
     }
     return {
       label,
       value: point.topWeight,
-      detail: `Top set ${point.topWeight} kg × ${point.topRepsAtTop} reps${
-        point.estimated1rm ? ` · est. 1RM ${point.estimated1rm} kg` : ''
+      detail: `Top set ${formatWeight(point.topWeight, unit)} ${unit} × ${point.topRepsAtTop} reps${
+        point.estimated1rm ? ` · est. 1RM ${formatWeight(point.estimated1rm, unit)} ${unit}` : ''
       }`,
     };
   });
@@ -196,6 +196,9 @@ export function ExerciseDetail({
         </p>
       ) : null}
 
+      {catalogueExercise ? <ExerciseMediaGallery exercise={catalogueExercise} large /> : null}
+      <MuscleDiagram primary={primaryMuscles} secondary={secondaryMuscles} />
+
       {catalogueExercise?.instructions ? (
         <details className="detail-instructions">
           <summary>Instructions</summary>
@@ -223,14 +226,14 @@ export function ExerciseDetail({
               <span className="stat__label">Best set</span>
               <strong className="stat__value">
                 {stats.bestWeight > 0
-                  ? `${numberFormat.format(stats.bestWeight)} kg × ${stats.bestReps}`
+                  ? `${formatWeight(stats.bestWeight, unit)} ${unit} × ${stats.bestReps}`
                   : `${stats.bestReps} reps`}
               </strong>
             </div>
             <div className="stat">
               <span className="stat__label">Total volume</span>
               <strong className="stat__value">
-                {compactFormat.format(stats.totalVolume)} kg
+                {formatVolume(stats.totalVolume, unit)} {unit}
               </strong>
             </div>
             <div className="stat">
@@ -291,14 +294,16 @@ export function ExerciseDetail({
               valueFormat={(value) =>
                 effectiveMode === 'reps'
                   ? `${numberFormat.format(value)} reps`
-                  : `${numberFormat.format(value)} kg`
+                  : effectiveMode === 'volume'
+                    ? `${formatVolume(value, unit)} ${unit}`
+                    : `${formatWeight(value, unit)} ${unit}`
               }
             />
           </section>
 
           <section className="detail-section">
             <h3 className="detail-section__title">Personal records</h3>
-            <PrTable prs={prs} onOpenSession={onOpenSession} />
+            <PrTable prs={prs} unit={unit} onOpenSession={onOpenSession} />
           </section>
 
           <section className="detail-section">
@@ -315,13 +320,13 @@ export function ExerciseDetail({
                     <span className="history-row__main">
                       <strong>
                         {point.topWeight > 0
-                          ? `${numberFormat.format(point.topWeight)} kg × ${point.topRepsAtTop}`
+                          ? `${formatWeight(point.topWeight, unit)} ${unit} × ${point.topRepsAtTop}`
                           : `${point.topRepsAtTop} reps`}
                       </strong>
-                      <span className="history-row__sets">{formatSetList(point)}</span>
+                      <span className="history-row__sets">{formatSetList(point, unit)}</span>
                     </span>
                     <span className="history-row__metric">
-                      {compactFormat.format(point.volume)} kg
+                      {formatVolume(point.volume, unit)} {unit}
                     </span>
                   </button>
                 </li>
