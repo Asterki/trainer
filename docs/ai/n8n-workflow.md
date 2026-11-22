@@ -44,7 +44,7 @@ Create one Header Auth credential named `Trainer relay`:
 
 - Every day at **06:00** in `TRAINER_TIMEZONE` (or the gym's timezone). Set the workflow timezone
   explicitly if the n8n instance timezone differs.
-- Keep a manual trigger for tests. The relay accepts a write only for today ±1 day.
+- Keep a manual trigger for tests. The relay accepts writes from yesterday through 14 days ahead.
 
 ### 2.2 HTTP Request — context
 
@@ -251,6 +251,7 @@ The API never accepts a weight from the model.
 
 - `PUT {RELAY_URL}/api/v1/sessions/{date}` where `{date}` is `context.date`.
 - Same Header Auth credential, `Content-Type: application/json`, 20 second timeout.
+- To plan ahead, repeat the context read and write once per date. The relay accepts one request for any date from yesterday through 14 days ahead.
 - Body: the validated object from §2.5.
 - Success: `200` with the full stored session. Log only date and session id, never the body.
 

@@ -55,7 +55,7 @@ HTTP Request: PUT /api/v1/sessions/{date}
 - Rule: every day at **06:00** in the gym timezone. If n8n's instance timezone differs, set the
   workflow timezone explicitly or schedule in UTC with the offset.
 - One run per day. A manual trigger is enabled for testing.
-- The relay also validates the target date; a run around midnight is accepted only within ±1 day.
+- The relay also validates the target date; a run around midnight is accepted from yesterday through 14 days ahead.
 
 ### 3.2 HTTP Request — context
 

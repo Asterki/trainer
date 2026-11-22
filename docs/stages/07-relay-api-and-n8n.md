@@ -210,7 +210,7 @@ Order of checks:
 
 1. Auth → 401.
 2. Valid date → 400.
-3. Date within today ±1 day in `TRAINER_TIMEZONE` → 400 `date_out_of_range`.
+3. Date from yesterday through 14 days ahead in `TRAINER_TIMEZONE` → 400 `date_out_of_range`.
 4. Body shape → 400 with field details.
 5. Resolve the active routine and slot. No active routine or rest day → 409 `no_scheduled_workout`.
 6. Find an existing session for the date.
@@ -403,7 +403,7 @@ cd server && pnpm build   # or the server's documented build command
 |------|------------|
 | Duplicated client/server rules drift | Parity checklist + shared fixture, reviewed each change |
 | PBKDF2 cost per request | 10-minute in-memory key cache, derivation rate limit |
-| Clock/timezone mismatch | Relay timezone env, explicit dates, ±1 day write window |
+| Clock/timezone mismatch | Relay timezone env, explicit dates, one-day grace plus a 14-day planning horizon |
 | n8n writes after training starts | Server rejects when sets exist; client merge guard |
 | Sync overwrites terminal sessions | Terminal-status protection; tests via manual two-device flow |
 | Context too large | Hard caps, candidates instead of full catalogue, compact fields |

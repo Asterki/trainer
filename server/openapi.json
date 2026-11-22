@@ -397,14 +397,14 @@
       "put": {
         "tags": ["Sessions"],
         "operationId": "putSessionPlan",
-        "summary": "Create or replace today's planned session",
-        "description": "Writes an AI plan for today (plus a ±1 day timezone grace). The day must be a scheduled workout of the active routine. Writes are rejected with 409 when the session is closed, is an ad-hoc manual session, or already has a logged set. Exercise ids win; otherwise an exact unique normalized name is required.",
+        "summary": "Create or replace a planned session",
+        "description": "Writes an AI plan for a date up to 14 days ahead (plus a one-day grace for timezone edges). The day must be a scheduled workout of the active routine. Writes are rejected with 409 when the session is closed, is an ad-hoc manual session, or already has a logged set. Exercise ids win; otherwise an exact unique normalized name is required. Send one request per date to plan several days ahead.",
         "parameters": [
           {
             "name": "date",
             "in": "path",
             "required": true,
-            "description": "Today's local date in the relay timezone, with a ±1 day grace.",
+            "description": "Target local date in the relay timezone: yesterday through 14 days ahead.",
             "schema": { "$ref": "#/components/schemas/IsoDate" }
           }
         ],

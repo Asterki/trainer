@@ -598,7 +598,7 @@ Rules:
 - `exerciseId` wins. Otherwise `name` is normalized (case, punctuation, whitespace) and must match
   exactly one catalogue or custom exercise. Unknown names return `422`; ambiguous names return `409`
   with up to five candidate ids.
-- Writes only to today in the relay timezone, with a ±1 day grace for timezone edges.
+- Writes from yesterday through 14 days ahead in the relay timezone: a one-day grace for timezone edges and a 14-day planning horizon for n8n.
 - `409` if the session is completed or skipped, if any set is already logged, or if it is an ad-hoc
   manual session. `409` if the day is a rest day or there is no active routine.
 - The response is the full stored session. The write is encrypted and ordered with a fresh HLC, so

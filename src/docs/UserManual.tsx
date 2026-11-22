@@ -217,8 +217,9 @@ export function UserManual() {
           The AI prescribes exercises, sets and rep ranges only — never weight. Writes use a catalogue
           id or an exact resolved name; unknown names return <code>422</code>, ambiguous names{' '}
           <code>409</code>, and a completed, skipped or already-logged session cannot be overwritten.
-          The plan stays <strong>Plan pending</strong> until it has exercises, and you can edit it on
-          the day.
+          The API accepts one plan per date, from yesterday through 14 days ahead, so a workflow can
+          plan up to two weeks in advance. The plan stays <strong>Plan pending</strong> until it has
+          exercises, and you can edit it on the day.
         </p>
         <p className="manual__warning">
           <strong>Security warning.</strong> Your passphrase derives the encryption key and

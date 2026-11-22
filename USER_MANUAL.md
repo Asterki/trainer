@@ -149,8 +149,10 @@ Trainer itself never calls an AI and holds no provider key. The optional loop is
 
 The AI prescribes exercises, sets and rep ranges only — never weight. Writes use a catalogue id or an
 exact resolved name. Unknown names are rejected with `422`, ambiguous names with `409`, and an
-existing completed/skipped session or one with logged sets cannot be overwritten. The plan appears as
-**Plan pending** until it has exercises, and you can always edit it on the day.
+existing completed/skipped session or one with logged sets cannot be overwritten. The API accepts one
+plan per date, from yesterday through 14 days ahead, so a workflow can plan up to two weeks in
+advance. The plan appears as **Plan pending** until it has exercises, and you can always edit it on
+the day.
 
 Setup details: [`docs/ai/n8n-workflow.md`](docs/ai/n8n-workflow.md), the API contract in
 [`docs/api/openapi.json`](docs/api/openapi.json), and **Copy API setup** in the Sync card.

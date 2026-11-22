@@ -214,8 +214,8 @@ export async function putSessionHandler(req: Request, res: Response): Promise<vo
   }
 
   const today = relayToday();
-  if (rawDate < addDays(today, -1) || rawDate > addDays(today, 1)) {
-    fail(400, 'date_out_of_range', 'The relay only accepts today plus or minus one day.', {
+  if (rawDate < addDays(today, -1) || rawDate > addDays(today, 14)) {
+    fail(400, 'date_out_of_range', 'The relay accepts writes from yesterday through 14 days ahead.', {
       date: rawDate,
       today,
     });

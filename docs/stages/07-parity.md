@@ -39,7 +39,7 @@ made while closing the server half of Stage 7.
 ## Known boundaries
 
 - The relay uses `TRAINER_TIMEZONE` (default `UTC`) while a device may use its own settings
-  timezone. The API accepts writes for today ±1 day in the relay timezone to absorb the edge.
+  timezone. The API accepts writes from yesterday through 14 days ahead in the relay timezone to absorb the edge and let n8n plan ahead.
 - The context report's `generatedAt` uses `Date.toISOString()` (`Z`) while examples use `+00:00`;
   both are valid ISO 8601 date-times.
 - Old task/category/project/place rows remain in existing SQLite files and are ignored. The legacy

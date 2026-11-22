@@ -365,7 +365,7 @@ Rules:
 - Max 30 exercises, `targetSets` 1–12, rep range 1–50, note ≤ 500 chars.
 - `exerciseId` wins. Otherwise `name` is normalized (case, punctuation, whitespace) and must match
   exactly one catalogue exercise. Ambiguous → `409` with candidate ids. Unknown → `422`.
-- Writes only to today's date in the relay timezone (plus a ±1 day grace for timezone edges).
+- Writes from yesterday through 14 days ahead in the relay timezone (plus a 14-day planning horizon).
 - `409` if the session is completed or skipped, or if any set is already logged.
 - Response is the full stored session.
 - Auth failure `401`. Malformed body `400`. Rate limit `429`.
@@ -419,7 +419,7 @@ sets and rep ranges only.
 | Risk | Mitigation |
 |------|------------|
 | Report too large for the model | Hard limits; candidates instead of full catalogue |
-| Timezone mismatch between n8n, relay and phone | Explicit date, relay `TRAINER_TIMEZONE`, ±1 day write grace |
+| Timezone mismatch between n8n, relay and phone | Explicit date, relay `TRAINER_TIMEZONE`, one-day grace plus a 14-day planning horizon |
 | AI repeats sessions | Prompt includes recent sessions and explicit variety rule |
 | User logs after midnight | Past is read-only; document "finish before midnight" |
 | wger data quality (duplicate names, missing muscles) | Build-time normalization report; custom exercises for gaps |
